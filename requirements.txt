@@ -8,3 +8,6 @@ langchain-milvus
 groq
 langchain-core
 requests
+trafilatura
+lxml
+tiktoken
