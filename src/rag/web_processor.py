@@ -1,7 +1,6 @@
 from typing import List, Dict, Optional
 from lxml import etree
 import trafilatura
-import requests
 import re
 import tiktoken
 
@@ -270,33 +269,3 @@ def extract_and_chunk(
         chunk["source_url"] = url
 
     return chunks
-
-
-if __name__ == "__main__":
-    url = "https://www.chcs.org/resource/a-federally-qualified-health-center-and-certified-community-behavioral-health-clinic-partnership-in-rural-missouri/"
-
-    html = trafilatura.fetch_url(url)
-    if not html:
-        html = requests.get(url, timeout=15).text
-
-    MAX_TOKENS = 400
-    MIN_TOKENS = 100
-    OVERLAP_TOKENS = 40
-    MERGE_OVERFLOW = 20
-
-    chunks = extract_and_chunk(
-        html,
-        url=url,
-        max_tokens=MAX_TOKENS,
-        min_tokens=MIN_TOKENS,
-        overlap_tokens=OVERLAP_TOKENS,
-        merge_overflow=MERGE_OVERFLOW
-    )
-
-    print(f"\nTotal chunks: {len(chunks)}\n")
-
-    for c in chunks:
-        print("=" * 90)
-        print("HEADING:", c["heading_path"])
-        print("TOKENS:", c["tokens"])
-        print(c["text"])
