@@ -1,3 +1,4 @@
+import os
 import requests
 import trafilatura
 from web_processor import extract_and_chunk
@@ -6,12 +7,13 @@ from utils import detect_scenario_with_groq, overall_scenario_distribution, buil
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from groq import Groq
+from embedding_processor import EmbeddingProcessor
 
 configs = [
     {
         'url': "https://www.chcs.org/resource/a-federally-qualified-health-center-and-certified-community-behavioral-health-clinic-partnership-in-rural-missouri/",
         'source_id': 'web001',
-        'role': 'healthcare_admin',
+        'role': 'nurse',
         'source_title': "FQHC and CCBHC Partnership in Rural Missouri"
     },
     {
@@ -142,6 +144,59 @@ print(f"Total chunks created: {len(all_documents)}")
 
 # Overall scenario distribution
 overall_scenario_distribution(all_documents)
+
+# Generate embeddings and store in vector database
+print(f"\n{'='*80}")
+print(f"GENERATING EMBEDDINGS AND STORING IN VECTOR DATABASE")
+print(f"{'='*80}")
+
+try:
+    embedding_processor = EmbeddingProcessor(
+        embedding_provider="sentence_transformers",
+        vector_db="chromadb",
+        collection_name="opioid_documents"
+    )
+
+    # Store all documents with embeddings
+    embedding_processor.store_documents(
+        documents=all_documents,
+        batch_size=100
+    )
+
+    # Get and display stats
+    stats = embedding_processor.get_collection_stats()
+    print(f"\n✓ Vector Database Stats:")
+    print(f"  Total documents stored: {stats['total_documents']}")
+    print(f"  Embedding dimension: {stats['embedding_dimension']}")
+    print(f"  Collection name: {stats['collection_name']}")
+
+    # Example search to verify it works
+    print(f"\n{'='*80}")
+    print(f"EXAMPLE SEARCH (Testing Vector Database)")
+    print(f"{'='*80}")
+
+    query = "How to respond to an opioid overdose?"
+    print(f"Query: '{query}'")
+
+    results = embedding_processor.search(
+        query=query,
+        n_results=3,
+        filters={"role": "nurse", "scenario_type": "opioid_overdose_response"},
+    )
+
+    print(f"\nFound {len(results)} results:\n")
+    for i, result in enumerate(results, 1):
+        print(f"{i}. Chunk ID: {result['id']}")
+        print(f"   Scenario: {result['metadata'].get('scenario_type', 'N/A')}")
+        print(f"   Source: {result['metadata'].get('source_title', 'N/A')}")
+        print(f"   Distance: {result.get('distance', 'N/A'):.4f}")
+        print(f"   Preview: {result['text'][:200]}...")
+        print()
+
+except ImportError:
+    print("\n Embedding processor not available. Install dependencies:")
+except Exception as e:
+    print(f"\n Error during embedding generation: {e}")
 
 print(f"\n{'='*80}")
 print("Processing complete!")

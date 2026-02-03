@@ -108,7 +108,7 @@ def build_chunk_metadata(
     metadata = {
         "chunk_id": chunk_id,
         "source_id": source_id,
-        "role": config.get('role', 'general'),
+        "role": config.get('role', 'nurse'),
         "scenario_type": scenario_type,
         "source_title": config.get('source_title', 'Unknown'),
         "source_link": config.get('url', ''),
