@@ -2,7 +2,7 @@ import os
 import requests
 import trafilatura
 from web_processor import extract_and_chunk
-from pdf_processor import process_pdf
+from pdf_parsing import HybridPDFParser
 from utils import detect_scenario_with_groq, overall_scenario_distribution, build_chunk_metadata
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
@@ -18,20 +18,15 @@ configs = [
     },
     {
         'url': "https://www.asam.org/docs/default-source/quality-science/a-drug-court-team-member%27s-guide-to-medication-in-addiction-treatment.pdf",
+        'pdf_path': "src/pdf/pdf1.pdf",
         'pdf_id': 'pdf001',
         'role': 'social_worker',
         'source_title': "A Drug Court Team Member's Guide to Medication in Addiction Treatment",
     },
-    {
-        'url': "https://www.oregonpainguidance.org/wp-content/uploads/2020/06/13.-CDC-Why-Guidelines-for-Primary-Care-Providers.pdf",
-        'pdf_id': 'pdf002',
-        'role': 'nurse',
-        'source_title': "CDC Guidelines for Primary Care Providers",
-    },
 ]
 
 # Initialize Groq client
-GROQ_API_KEY = "your_api_key"
+GROQ_API_KEY = "groq_key"
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY environment variable not set")
 
@@ -50,6 +45,7 @@ MIN_TOKENS = 100
 OVERLAP_TOKENS = 40
 MERGE_OVERFLOW = 20
 all_documents = []
+chunk_output_path = "outputs/chunks_output.jsonl"
 
 for config in configs:
     print(f"\n{'='*80}")
@@ -58,10 +54,18 @@ for config in configs:
 
     url = config['url']
 
-    if url.endswith('.pdf'):
-        # Process PDF
-        pdf_documents = process_pdf(config, groq_client, text_splitter)
-        all_documents.extend(pdf_documents)
+    if url.endswith('.pdf') or config.get("pdf_path"):
+        # Process PDF using hybrid parser
+        pdf_path = config.get("pdf_path")
+        if not pdf_path:
+            print("⚠️  pdf_path not provided for PDF config; skipping.")
+            continue
+        parser = HybridPDFParser()
+        result = parser.parse(pdf_path)
+        output_dir = "hybrid_output"
+        os.makedirs(output_dir, exist_ok=True)
+        md_path = os.path.join(output_dir, f"{config.get('pdf_id', 'pdf')}.md")
+        parser.save_markdown(result, md_path)
 
     else:
         # Process web page
@@ -86,13 +90,14 @@ for config in configs:
         web_documents = []
         scenario_distribution = {}
 
-        print("\nDetecting scenario types...")
+        # print("\nDetecting scenario types...")
         for chunk_index, chunk in enumerate(chunks):
-            print(f"  Chunk {chunk_index + 1}/{len(chunks)}... ", end="")
+            # print(f"  Chunk {chunk_index + 1}/{len(chunks)}... ", end="")
 
             chunk_text = chunk['text']
-            scenario_type = detect_scenario_with_groq(chunk_text, groq_client)
-            print(f"→ {scenario_type}")
+            # scenario_type = detect_scenario_with_groq(chunk_text, groq_client)
+            scenario_type = "general_opioid_information"
+            # print(f"→ {scenario_type}")
 
             scenario_distribution[scenario_type] = scenario_distribution.get(
                 scenario_type, 0) + 1
@@ -120,13 +125,18 @@ for config in configs:
             percentage = (count / len(web_documents)) * 100
             print(f"    {scenario}: {count} chunks ({percentage:.1f}%)")
 
-        # Print sample chunk
-        print("\n  Sample chunks:")
-        for c in chunks[:2]:
-            print("  " + "-" * 86)
-            print(f"  HEADING: {c['heading_path']}")
-            print(f"  TOKENS: {c['tokens']}")
-            print(f"  TEXT: {c['text'][:150]}...")
+        # Write chunk output to a file (JSONL)
+        os.makedirs(os.path.dirname(chunk_output_path), exist_ok=True)
+        with open(chunk_output_path, "a", encoding="utf-8") as f:
+            for c in chunks:
+                record = {
+                    "source_title": config.get("source_title", "Unknown"),
+                    "source_url": url,
+                    "heading_path": c.get("heading_path", "Document"),
+                    "tokens": c.get("tokens", 0),
+                    "text": c.get("text", ""),
+                }
+                f.write(f"{record}\n")
 
 # Final Summary
 print(f"\n{'='*80}")
@@ -153,8 +163,9 @@ print(f"{'='*80}")
 try:
     embedding_processor = EmbeddingProcessor(
         embedding_provider="sentence_transformers",
-        vector_db="chromadb",
-        collection_name="opioid_documents"
+        vector_db="pgvector",
+        collection_name="opioid_documents",
+        pg_dsn=os.getenv("PGVECTOR_DSN"),
     )
 
     # Store all documents with embeddings

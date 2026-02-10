@@ -3,6 +3,7 @@ from lxml import etree
 import trafilatura
 import re
 import tiktoken
+import os
 
 _enc = tiktoken.get_encoding("cl100k_base")
 _SENT_SPLIT_RE = re.compile(r'(?<=[.!?;:])\s+')
@@ -120,6 +121,139 @@ def split_large_text(text: str, max_tokens: int) -> List[str]:
     return cleaned
 
 
+def split_by_paragraphs(
+    text: str,
+    max_tokens: int,
+    min_tokens: int,
+    merge_overflow: int = 30
+) -> List[str]:
+    """
+    Split text strictly on paragraph boundaries, only falling back to
+    finer splits when a single paragraph exceeds max_tokens.
+    For large paragraphs, split on sentence boundaries and try to avoid
+    tiny remainders by choosing the nearest sentence end under max_tokens.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    if not paragraphs:
+        paragraphs = [text]
+
+    chunks: List[str] = []
+    buffer: List[str] = []
+
+    def flush(buf: List[str]):
+        joined = " ".join(buf).strip()
+        if joined:
+            chunks.append(joined)
+
+    for p in paragraphs:
+        buffer.append(p)
+        if estimate_tokens(" ".join(buffer)) > max_tokens:
+            buffer.pop()
+            if buffer:
+                flush(buffer)
+                buffer = []
+
+            # Single paragraph too large; fall back to finer splitting
+            if estimate_tokens(p) > max_tokens:
+                chunks.extend(split_large_text_near_max(
+                    p,
+                    max_tokens=max_tokens,
+                    min_tokens=min_tokens,
+                    merge_overflow=merge_overflow
+                ))
+                buffer = []
+            else:
+                buffer = [p]
+
+    if buffer:
+        flush(buffer)
+
+    return [c for c in chunks if c.strip()]
+
+
+def split_large_text_near_max(
+    text: str,
+    max_tokens: int,
+    min_tokens: int,
+    merge_overflow: int = 30
+) -> List[str]:
+    """
+    Split large text by sentence boundaries, selecting the nearest sentence
+    end under max_tokens. If the last chunk is too small, rebalance by
+    moving sentences from the previous chunk when possible.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    def split_into_sentences(paragraph: str) -> List[str]:
+        paragraph = paragraph.strip()
+        if not paragraph:
+            return []
+        return [s.strip() for s in _SENT_SPLIT_RE.split(paragraph) if s.strip()]
+
+    def split_into_clauses(sentence: str) -> List[str]:
+        sentence = sentence.strip()
+        if not sentence:
+            return []
+        return [sentence]
+
+    bullet_re = re.compile(r'^\s*(?:[-*•‣–—]|\\d+[\\.)])\\s+')
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    has_bullets = any(bullet_re.match(ln) for ln in lines)
+
+    if has_bullets:
+        units = lines
+    else:
+        units = split_into_sentences(text)
+
+    if not units:
+        return []
+
+    soft_max = max_tokens + merge_overflow
+    chunks: List[List[str]] = []
+    cur: List[str] = []
+
+    for s in units:
+        cur.append(s)
+        cur_tokens = estimate_tokens(" ".join(cur))
+        if cur_tokens > soft_max:
+            cur.pop()
+            if cur:
+                chunks.append(cur)
+            cur = [s]
+            cur_tokens = estimate_tokens(" ".join(cur))
+
+        if cur_tokens > soft_max:
+            # If a single unit (sentence or bullet) is too long, keep it intact.
+            s_tokens = estimate_tokens(s)
+            chunks.append([s])
+            cur = []
+
+    if cur:
+        chunks.append(cur)
+
+    if len(chunks) >= 2:
+        last = chunks[-1]
+        prev = chunks[-2]
+        last_tokens = estimate_tokens(" ".join(last))
+        if last_tokens < min_tokens and prev:
+            while prev and last_tokens < min_tokens:
+                moved = prev.pop()
+                last.insert(0, moved)
+                last_tokens = estimate_tokens(" ".join(last))
+            if not prev:
+                chunks[-2] = []
+
+        chunks = [c for c in chunks if c]
+
+    return [" ".join(c).strip() for c in chunks if " ".join(c).strip()]
+
+
 def merge_small_remainders(parts: List[str], min_tokens: int, max_tokens: int, merge_overflow: int = 30) -> List[str]:
     merged: List[str] = []
     soft_max = max_tokens + merge_overflow
@@ -151,13 +285,51 @@ def apply_overlap(parts: List[str], overlap_tokens: int, max_tokens: int, merge_
         return parts
 
     soft_max = max_tokens + merge_overflow
+    bullet_re = re.compile(r'^\s*(?:[-*•‣–—]|\d+[\.)])\s+')
     out = [parts[0]]
+
+    def sentence_overlap(text: str, budget: int) -> str:
+        sentences = [s.strip()
+                     for s in _SENT_SPLIT_RE.split(text) if s.strip()]
+        if not sentences:
+            return ""
+        picked: List[str] = []
+        total = 0
+        for s in reversed(sentences):
+            st = estimate_tokens(s)
+            if total + st > budget:
+                break
+            picked.append(s)
+            total += st
+        if not picked:
+            return ""
+        return " ".join(reversed(picked)).strip()
+
+    def bullet_overlap(text: str, budget: int) -> str:
+        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        bullet_lines = [ln for ln in lines if bullet_re.match(ln)]
+        if not bullet_lines:
+            return ""
+        picked: List[str] = []
+        total = 0
+        for ln in reversed(bullet_lines):
+            lt = estimate_tokens(ln)
+            if total + lt > budget:
+                break
+            picked.append(ln)
+            total += lt
+        if not picked:
+            return ""
+        return "\n".join(reversed(picked)).strip()
 
     for i in range(1, len(parts)):
         prev = out[-1]
         cur = parts[i]
 
-        overlap = last_n_tokens(prev, overlap_tokens).strip()
+        overlap = bullet_overlap(
+            prev, overlap_tokens) or sentence_overlap(prev, overlap_tokens)
+        if not overlap:
+            overlap = last_n_tokens(prev, overlap_tokens).strip()
         if overlap:
             candidate = f"{overlap} {cur}".strip()
         else:
@@ -191,7 +363,7 @@ def chunk_by_heading(
     root = etree.fromstring(xml_text.encode("utf-8"))
 
     chunks: List[Dict] = []
-    heading_stack: List[str] = []
+    heading_stack: List[tuple] = []
     buffer: List[str] = []
 
     def flush():
@@ -199,7 +371,7 @@ def chunk_by_heading(
         if not buffer:
             return
 
-        text = " ".join(buffer).strip()
+        text = "\n".join(buffer).strip()
         buffer = []
         if not text:
             return
@@ -209,10 +381,15 @@ def chunk_by_heading(
             return
 
         heading_path = " > ".join(
-            heading_stack) if heading_stack else "Document"
+            h for _, h in heading_stack) if heading_stack else "Document"
 
         if tokens > max_tokens:
-            parts = split_large_text(text, max_tokens=max_tokens)
+            parts = split_by_paragraphs(
+                text,
+                max_tokens=max_tokens,
+                min_tokens=min_tokens,
+                merge_overflow=merge_overflow
+            )
             parts = merge_small_remainders(
                 parts, min_tokens=min_tokens, max_tokens=max_tokens, merge_overflow=merge_overflow)
             parts = apply_overlap(parts, overlap_tokens=overlap_tokens,
@@ -237,11 +414,22 @@ def chunk_by_heading(
         if tag == "head" and elem.text and elem.text.strip():
             flush()
             heading_text = elem.text.strip()
-            heading_stack = heading_stack[:1] if heading_stack else []
-            heading_stack.append(heading_text)
+            rend = (elem.get("rend") or "").lower()
+            level = None
+            if rend.startswith("h") and rend[1:].isdigit():
+                level = int(rend[1:])
+            if level is None:
+                heading_stack = [(1, heading_text)]
+            else:
+                while heading_stack and heading_stack[-1][0] >= level:
+                    heading_stack.pop()
+                heading_stack.append((level, heading_text))
 
         elif tag in {"p", "item"} and elem.text and elem.text.strip():
-            buffer.append(elem.text.strip())
+            line = elem.text.strip()
+            if tag == "item":
+                line = f"• {line}"
+            buffer.append(line)
 
     flush()
     return chunks
@@ -256,6 +444,12 @@ def extract_and_chunk(
     merge_overflow: int = 30
 ) -> List[Dict]:
     xml = extract_xml(html)
+    xml_file = "outputs/xml_file.xml"
+    dir_path = os.path.dirname(xml_file)
+    if dir_path:
+        os.makedirs(dir_path, exist_ok=True)
+    with open(xml_file, "a", encoding="utf-8") as f:
+        f.write(f"{xml}\n")
     chunks = chunk_by_heading(
         xml,
         max_tokens=max_tokens,

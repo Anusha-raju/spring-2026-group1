@@ -11,3 +11,5 @@ requests
 trafilatura
 lxml
 tiktoken
+psycopg2-binary
+pgvector
