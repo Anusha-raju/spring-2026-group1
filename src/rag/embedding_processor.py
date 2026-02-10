@@ -3,7 +3,6 @@ from typing import List, Dict, Optional
 from langchain_core.documents import Document
 import logging
 from sentence_transformers import SentenceTransformer
-import chromadb
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +15,18 @@ class EmbeddingProcessor:
         embedding_provider: str = "sentence_transformers",
         vector_db: str = "chromadb",
         collection_name: str = "opioid_documents",
-        db_path: str = "./chroma_db"
+        db_path: str = "./pgvector",
+        pg_dsn: str | None = None
     ):
         """
         Initialize embedding processor
 
         Args:
             embedding_provider: "sentence_transformers"
-            vector_db: "chromadb" or "pinecone"
+            vector_db: "pgvector"
             collection_name: Name of the collection/index
             db_path: Path for local database (ChromaDB only)
+            pg_dsn: Postgres DSN for pgvector (e.g., RDS)
         """
         self.embedding_provider = embedding_provider
         self.vector_db = vector_db
@@ -35,7 +36,7 @@ class EmbeddingProcessor:
         self._init_embedding_model()
 
         # Initialize vector database
-        self._init_vector_db(db_path)
+        self._init_vector_db(db_path=db_path, pg_dsn=pg_dsn)
 
     def _init_embedding_model(self):
         """Initialize the embedding model"""
@@ -43,15 +44,50 @@ class EmbeddingProcessor:
         self.embedding_dim = 384
         logger.info("Initialized Sentence Transformers: all-MiniLM-L6-v2")
 
-    def _init_vector_db(self, db_path: str):
+    def _init_vector_db(self, db_path: str, pg_dsn: str | None = None):
         """Initialize the vector database"""
-        self.client = chromadb.PersistentClient(path=db_path)
+        if self.vector_db == "pgvector":
+            try:
+                import psycopg2
+                from pgvector.psycopg2 import register_vector
+            except ImportError as e:
+                raise ImportError(
+                    "pgvector backend requires psycopg2-binary and pgvector"
+                ) from e
 
-        # Create or get collection
-        self.collection = self.client.get_or_create_collection(name=self.collection_name, metadata={
-                                                               "description": "Opioid healthcare documents with embeddings"})
-        logger.info(
-            f"Initialized ChromaDB collection: {self.collection_name}")
+            dsn = pg_dsn or os.getenv("PGVECTOR_DSN")
+            if not dsn:
+                raise ValueError(
+                    "PGVECTOR_DSN is not set and no pg_dsn was provided")
+
+            self.pg_conn = psycopg2.connect(dsn)
+            self.pg_conn.autocommit = True
+            register_vector(self.pg_conn)
+
+            table = self.collection_name
+            with self.pg_conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                cur.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {table} (
+                        id TEXT PRIMARY KEY,
+                        embedding VECTOR({self.embedding_dim}),
+                        document TEXT,
+                        metadata JSONB
+                    );
+                    """
+                )
+                # IVFFLAT index is optional; requires ANALYZE for best results
+                cur.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {table}_embedding_idx
+                    ON {table} USING ivfflat (embedding vector_cosine_ops);
+                    """
+                )
+            logger.info(f"Initialized pgvector table: {table}")
+            return
+
+        raise ValueError(f"Unsupported vector_db: {self.vector_db}")
 
     def generate_embedding(self, text: str) -> List[float]:
         """
@@ -117,32 +153,12 @@ class EmbeddingProcessor:
         # Store in vector database
         logger.info("Storing in vector database...")
 
-        self._store_chromadb(texts, embeddings, metadatas, ids, batch_size)
+        if self.vector_db == "pgvector":
+            self._store_pgvector(texts, embeddings, metadatas, ids, batch_size)
+        else:
+            raise ValueError(f"Unsupported vector_db: {self.vector_db}")
 
         logger.info(f"✓ Successfully stored {len(documents)} documents")
-
-    def _store_chromadb(
-        self,
-        texts: List[str],
-        embeddings: List[List[float]],
-        metadatas: List[Dict],
-        ids: List[str],
-        batch_size: int
-    ):
-        """Store documents in ChromaDB"""
-        total_batches = (len(texts) - 1) // batch_size + 1
-
-        for i in range(0, len(texts), batch_size):
-            batch_end = min(i + batch_size, len(texts))
-            batch_num = i // batch_size + 1
-
-            self.collection.upsert(
-                embeddings=embeddings[i:batch_end],
-                documents=texts[i:batch_end],
-                metadatas=metadatas[i:batch_end],
-                ids=ids[i:batch_end]
-            )
-            logger.info(f"  Stored batch {batch_num}/{total_batches}")
 
     def search(
         self,
@@ -163,38 +179,12 @@ class EmbeddingProcessor:
         """
         # Generate query embedding
         query_embedding = self.generate_embedding(query)
-        return self._search_chromadb(query_embedding, n_results, filters)
+        if self.vector_db == "pgvector":
+            return self._search_pgvector(query_embedding, n_results, filters)
+        raise ValueError(f"Unsupported vector_db: {self.vector_db}")
 
     def build_and_filter(self, filters: dict):
         return {"$and": [{k: v} for k, v in filters.items()]}
-
-    def _search_chromadb(
-        self,
-        query_embedding: List[float],
-        n_results: int,
-        filters: Optional[Dict]
-    ) -> List[Dict]:
-        """Search in ChromaDB"""
-        parsed_filters = None
-        if filters is not None:
-            parsed_filters = self.build_and_filter(filters)
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=parsed_filters
-        )
-
-        # Format results
-        formatted_results = []
-        for i in range(len(results['ids'][0])):
-            formatted_results.append({
-                "id": results['ids'][0][i],
-                "text": results['documents'][0][i],
-                "metadata": results['metadatas'][0][i],
-                "distance": results['distances'][0][i]
-            })
-
-        return formatted_results
 
     def get_collection_stats(self) -> Dict:
         """
@@ -203,14 +193,90 @@ class EmbeddingProcessor:
         Returns:
             Dictionary with collection statistics
         """
-        count = self.collection.count()
-        return {
-            "total_documents": count,
-            "collection_name": self.collection_name,
-            "embedding_dimension": self.embedding_dim
-        }
+        if self.vector_db == "pgvector":
+            with self.pg_conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) FROM {self.collection_name}")
+                count = cur.fetchone()[0]
+            return {
+                "total_documents": count,
+                "collection_name": self.collection_name,
+                "embedding_dimension": self.embedding_dim
+            }
+        raise ValueError(f"Unsupported vector_db: {self.vector_db}")
 
     def delete_collection(self):
         """Delete the entire collection (use with caution!)"""
-        self.client.delete_collection(name=self.collection_name)
-        logger.info(f"Deleted ChromaDB collection: {self.collection_name}")
+        if self.vector_db == "pgvector":
+            with self.pg_conn.cursor() as cur:
+                cur.execute(f"DROP TABLE IF EXISTS {self.collection_name}")
+            logger.info(f"Deleted pgvector table: {self.collection_name}")
+            return
+        raise ValueError(f"Unsupported vector_db: {self.vector_db}")
+
+    def _store_pgvector(
+        self,
+        texts: List[str],
+        embeddings: List[List[float]],
+        metadatas: List[Dict],
+        ids: List[str],
+        batch_size: int
+    ):
+        table = self.collection_name
+        for i in range(0, len(texts), batch_size):
+            batch_end = min(i + batch_size, len(texts))
+            with self.pg_conn.cursor() as cur:
+                for j in range(i, batch_end):
+                    cur.execute(
+                        f"""
+                        INSERT INTO {table} (id, embedding, document, metadata)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE SET
+                            embedding = EXCLUDED.embedding,
+                            document = EXCLUDED.document,
+                            metadata = EXCLUDED.metadata
+                        """,
+                        (ids[j], embeddings[j], texts[j], metadatas[j])
+                    )
+            logger.info(
+                f"  Stored batch {(i // batch_size) + 1}/{(len(texts) - 1) // batch_size + 1}")
+
+    def _search_pgvector(
+        self,
+        query_embedding: List[float],
+        n_results: int,
+        filters: Optional[Dict]
+    ) -> List[Dict]:
+        table = self.collection_name
+
+        where_sql = ""
+        filter_params: List = []
+        if filters:
+            clauses = []
+            for k, v in filters.items():
+                clauses.append(f"metadata->>%s = %s")
+                filter_params.extend([k, str(v)])
+            where_sql = "WHERE " + " AND ".join(clauses)
+
+        with self.pg_conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT id, document, metadata, embedding <=> %s AS distance
+                FROM {table}
+                {where_sql}
+                ORDER BY embedding <=> %s
+                LIMIT %s
+                """,
+                [query_embedding] + filter_params +
+                [query_embedding, n_results]
+            )
+            rows = cur.fetchall()
+
+        return [
+            {
+                "id": r[0],
+                "text": r[1],
+                "metadata": r[2],
+                "distance": float(r[3]),
+            }
+            for r in rows
+        ]
