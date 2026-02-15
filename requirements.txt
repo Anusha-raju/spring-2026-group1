@@ -13,3 +13,7 @@ lxml
 tiktoken
 psycopg2-binary
 pgvector
+rank-bm25
+scikit-learn
+openai
+tabulate
