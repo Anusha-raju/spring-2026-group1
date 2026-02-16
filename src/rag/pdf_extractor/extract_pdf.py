@@ -1,6 +1,7 @@
 from pdf_extractors.pdf_to_structured_text_xml import PDFtoXMLextractor
 from pdf_extractors.pdfplumber import PDFPlumberExtractor
 from pdf_extractors.pdf_pypdf import PDFPyPDF
+from pdf_extractors.deepseekpdf import PDFDeepSeek
 from pathlib import Path
 
 class ExtractPDF:
@@ -8,6 +9,7 @@ class ExtractPDF:
         self.pdftoxmlextractor = PDFtoXMLextractor()
         self.pdfplumberextractor = PDFPlumberExtractor()
         self.pdfpypdfextractor = PDFPyPDF()
+        self.pdfdeepseek = PDFDeepSeek()
         pass
 
     def extract_pdf(self, filepath, method = None):
@@ -18,6 +20,8 @@ class ExtractPDF:
             result = self.pdfplumberextractor.pdf_extract(filepath)
         elif method == "pypdf":
             result = self.pdfpypdfextractor.pdf_extract(filepath)
+        elif method == "deepseek":
+            self.pdfdeepseek.pdf_extract(filepath)
         
         return result
 
@@ -35,12 +39,11 @@ if __name__ == "__main__":
         print(pdf_file)
         extracted_text = pdfextractor.extract_pdf(
             str(pdf_file),
-            method="pypdf"
+            method="deepseek"
         )
+        # output_file = output_dir / f"{pdf_file.stem}.txt"
 
-        output_file = output_dir / f"{pdf_file.stem}.txt"
+        # with open(output_file, "w", encoding="utf-8") as f:
+        #     f.write(extracted_text)
 
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(extracted_text)
-
-        print(f"Saved: {output_file}")
+        # print(f"Saved: {output_file}")
