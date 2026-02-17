@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Embedding & Retrieval Comparison Pipeline
-==========================================
+Embedding & Retrieval Evaluation
+=================================
 Compares multiple embedding techniques (dense + sparse) across different k values
 using ground-truth QA pairs with precision, recall, MRR, and F1 metrics.
 
 Usage:
-    python src/rag/evaluation/run_comparison.py [--chunker_method METHOD] [--chunker_output_dir DIR]
+    python src/rag/embedding_retrieval/evaluation.py [--chunker_output_dir DIR]
 """
 
 import argparse
