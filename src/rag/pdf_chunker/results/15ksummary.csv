@@ -1,0 +1,6 @@
+method,hits,questions,avg_first_hit_rank
+fixed,10,15,3.7
+recursive,9,15,1.2222222222222223
+fixed_overlap,9,15,1.5555555555555556
+sentence_pack,9,15,1.6666666666666667
+semantic,9,15,4.0
