@@ -119,6 +119,67 @@ def keyword_threshold_hit(chunk_text: str, qspec: Dict[str, Any]) -> Tuple[bool,
 
 
 # ----------------------------
+# Opioid topic tagging
+# ----------------------------
+
+OPIOID_TOPICS: Dict[str, List[str]] = {
+    "overdose": [
+        "overdose", "unresponsive", "unconscious", "blue lips", "cyanosis",
+        "stopped breathing", "not breathing", "limp", "won't wake",
+    ],
+    "emergency": [
+        "call 911", "emergency", "immediate action", "acute", "life-threatening",
+        "emergency room", "er visit", "urgent care",
+    ],
+    "naloxone": [
+        "naloxone", "narcan", "intranasal", "nasal spray", "intramuscular",
+        "opioid reversal", "antagonist",
+    ],
+    "withdrawal": [
+        "withdrawal", "detox", "detoxification", "cravings", "taper", "tapering",
+        "physical dependence", "abstinence", "discontinuation",
+    ],
+    "dosage": [
+        "dosage", "dose", "mg", "milligram", "prescribe", "titrate", "titration",
+        "twice daily", "once daily", "frequency",
+    ],
+    "treatment": [
+        "buprenorphine", "methadone", "suboxone", "mat", "medication assisted",
+        "treatment program", "opioid use disorder", "oud", "subutex",
+    ],
+    "prevention": [
+        "harm reduction", "prevention", "safe use", "risk reduction",
+        "safe storage", "disposal", "lock box", "take back",
+    ],
+    "mental_health": [
+        "mental health", "depression", "anxiety", "ptsd", "co-occurring",
+        "dual diagnosis", "counseling", "therapy", "psychiatric",
+    ],
+    "legal": [
+        "law", "legal", "regulation", "prescription", "controlled substance",
+        "dea", "schedule", "patient rights", "privacy", "hipaa",
+    ],
+    "patient_education": [
+        "patient education", "inform patient", "tell patient", "family",
+        "caregiver", "warning signs", "side effects", "what to expect",
+    ],
+}
+
+
+def tag_chunk(text: str) -> Dict[str, Any]:
+    """
+    Tag a chunk with opioid-domain topics using multi-label keyword matching.
+    Chunks that match no topic are NOT dropped — they get topics=[] and is_tagged=False.
+    """
+    text_lower = text.lower()
+    matched = [
+        topic for topic, keywords in OPIOID_TOPICS.items()
+        if any(kw in text_lower for kw in keywords)
+    ]
+    return {"topics": matched, "is_tagged": len(matched) > 0}
+
+
+# ----------------------------
 # Build chunks per method
 # ----------------------------
 
@@ -127,34 +188,82 @@ def build_chunks_for_method(
     corpus: Dict[str, str],
     target_tokens: int,
     model: SentenceTransformer,
-) -> List[Chunk]:
+) -> Tuple[List[Chunk], Dict[str, List[Chunk]]]:
+    """
+    Returns:
+        all_chunks   : flat list of all chunks across all files
+        chunks_by_file: dict mapping doc_id -> list of chunks for that file
+    """
     all_chunks: List[Chunk] = []
+    chunks_by_file: Dict[str, List[Chunk]] = {}
+
     for doc_id, text in corpus.items():
         if method == "fixed":
-            all_chunks.extend(chunk_fixed(text, doc_id, target_tokens))
+            file_chunks = chunk_fixed(text, doc_id, target_tokens)
         elif method == "fixed_overlap":
-            all_chunks.extend(chunk_fixed_overlap(text, doc_id, target_tokens, overlap_tokens=120))
+            file_chunks = chunk_fixed_overlap(text, doc_id, target_tokens, overlap_tokens=120)
         elif method == "recursive":
-            all_chunks.extend(chunk_recursive(text, doc_id, target_tokens))
+            file_chunks = chunk_recursive(text, doc_id, target_tokens)
         elif method == "sentence_pack":
-            all_chunks.extend(chunk_sentence_pack(text, doc_id, target_tokens))
+            file_chunks = chunk_sentence_pack(text, doc_id, target_tokens)
         elif method == "semantic":
-            all_chunks.extend(
-                chunk_semantic(
-                    text,
-                    doc_id,
-                    model=model,
-                    target_tokens=target_tokens,
-                    min_tokens=200,
-                    topic_shift_threshold=0.72,
-                    window=2,
-                )
+            file_chunks = chunk_semantic(
+                text,
+                doc_id,
+                model=model,
+                target_tokens=target_tokens,
+                min_tokens=200,
+                topic_shift_threshold=0.72,
+                window=2,
             )
         else:
             raise ValueError(f"Unknown method: {method}")
 
-    # Filter super tiny fragments
-    return [c for c in all_chunks if estimate_tokens(c.text) >= 30]
+        # Filter super tiny fragments per file
+        file_chunks = [c for c in file_chunks if estimate_tokens(c.text) >= 30]
+        chunks_by_file[doc_id] = file_chunks
+        all_chunks.extend(file_chunks)
+
+    return all_chunks, chunks_by_file
+
+
+# ----------------------------
+# Save chunked data
+# ----------------------------
+
+def save_chunked_data(
+    chunks_by_file: Dict[str, List[Chunk]],
+    out_dir: str,
+) -> None:
+    """
+    Save chunks as {filename}_chunks.jsonl with topic metadata.
+    Untagged chunks (topics=[]) are still saved — never dropped.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    for doc_id, chunks in chunks_by_file.items():
+        base_name = os.path.splitext(doc_id)[0]
+        chunks_file = os.path.join(out_dir, f"{base_name}_chunks.jsonl")
+
+        tagged_count = 0
+        with open(chunks_file, "w", encoding="utf-8") as f:
+            for chunk in chunks:
+                tags = tag_chunk(chunk.text)
+                if tags["is_tagged"]:
+                    tagged_count += 1
+                record = {
+                    "chunk_id": chunk.chunk_id,
+                    "doc_id": chunk.doc_id,
+                    "source": "pdf",
+                    "text": chunk.text,
+                    "token_count": estimate_tokens(chunk.text),
+                    "topics": tags["topics"],
+                    "is_tagged": tags["is_tagged"],
+                }
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        print(f"  Saved {len(chunks)} chunks → {chunks_file} "
+              f"({tagged_count} tagged, {len(chunks) - tagged_count} untagged)")
 
 
 # ----------------------------
@@ -177,14 +286,16 @@ def run_experiment(
     model = SentenceTransformer(embed_model_name)
     embed_dim = model.get_sentence_embedding_dimension()
 
-    methods = ["fixed", "fixed_overlap", "recursive", "sentence_pack", "semantic"]
+    # methods = ["fixed", "fixed_overlap", "recursive", "sentence_pack", "semantic"]/
+    methods = ["sentence_pack"]
 
     # Build 5 indexes
     indexes: Dict[str, VectorIndex] = {}
     for m in methods:
         print(f"\n=== Building index for: {m} ===")
-        chunks = build_chunks_for_method(m, corpus, target_tokens, model=model)
+        chunks, chunks_by_file = build_chunks_for_method(m, corpus, target_tokens, model=model)
         print(f"Chunks: {len(chunks)}")
+        save_chunked_data(chunks_by_file, out_dir)
         embs = embed_texts(model, [c.text for c in chunks])
         idx = VectorIndex(embed_dim)
         idx.add(embs, chunks)
@@ -269,8 +380,8 @@ def run_experiment(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--txt_dir", required=True, help="Folder containing *.txt files.")
-    parser.add_argument("--question_json", required=True, help="Path to question.json.")
+    parser.add_argument("--txt_dir", default="src/rag/pdf_extractor/outputs", help="Folder containing *.txt files.")
+    parser.add_argument("--question_json", default="src/rag/pdf_chunker/queries.json", help="Path to question.json.")
     parser.add_argument("--out_dir", default="./out", help="Output folder for CSV tables.")
     parser.add_argument("--k", type=int, default=3, help="Top-k retrieval (you want 3).")
     parser.add_argument("--target_tokens", type=int, default=600, help="Target chunk size (approx tokens).")
