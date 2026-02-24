@@ -1,28 +1,7 @@
 """
-web_processor.py
-================
-Production-grade web content extractor for the RAG pipeline.
-
+web content extractor for the RAG pipeline.
 Extracts clean structured text from URLs via a 4-stage pipeline::
-
     fetch_html  →  html_to_xml  →  xml_content_formattor  →  format_from_xml
-
-Exceptions raised by this module (importable from here):
-
-    FetchError       — HTTP 4xx/5xx, connection failures, timeouts, oversized responses
-    ExtractionError  — trafilatura found no extractable content
-    ParseError       — trafilatura XML output is malformed
-
-Usage::
-
-    extractor = WebExtractor()
-    page = extractor.extract_from_url("https://example.com")
-    print(page.title)
-    print(page.text)
-
-    # or as a context manager (ensures session is closed)
-    with WebExtractor() as ex:
-        page = ex.extract_from_url("https://example.com")
 """
 
 from __future__ import annotations
@@ -52,8 +31,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# ── Module-level defaults (override via WebExtractor constructor) ──────────────
-
 _DEFAULT_TIMEOUT: Tuple[int, int] = (10, 30)   # (connect_sec, read_sec)
 _DEFAULT_RETRIES: int = 3
 _DEFAULT_BACKOFF: float = 0.5                   # wait = backoff * 2^(attempt-1)
@@ -62,8 +39,6 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 _ACCEPTED_CONTENT_TYPES = ("text/html", "text/plain", "application/xhtml+xml")
 _USER_AGENT = "Mozilla/5.0 (compatible; RAGBot/1.0)"
 
-
-# ── Exception hierarchy ────────────────────────────────────────────────────────
 
 class WebExtractorError(Exception):
     """Base class for all WebExtractor failures."""
@@ -107,7 +82,7 @@ class ParseError(WebExtractorError):
         super().__init__(f"XML parse error: {reason}")
 
 
-# ── Data model ────────────────────────────────────────────────────────────────
+# Data model
 
 @dataclass(frozen=True)
 class ExtractedPage:
@@ -131,7 +106,7 @@ class ExtractedPage:
     element_count: int
 
 
-# ── Internal helpers ───────────────────────────────────────────────────────────
+# helper functions
 
 def _normalize_text(text: str) -> str:
     """Collapse excess blank lines and horizontal whitespace."""
@@ -154,7 +129,7 @@ def _build_session(retries: int, backoff_factor: float) -> requests.Session:
         backoff_factor=backoff_factor,
         status_forcelist=_RETRYABLE_STATUS,
         allowed_methods={"GET", "HEAD"},
-        raise_on_status=False,      # we raise our own FetchError with context
+        raise_on_status=False,  
         respect_retry_after_header=True,
     )
     adapter = HTTPAdapter(max_retries=retry_policy)
@@ -164,12 +139,10 @@ def _build_session(retries: int, backoff_factor: float) -> requests.Session:
     return session
 
 
-# ── WebExtractor ──────────────────────────────────────────────────────────────
+# WebExtractor
 
 class WebExtractor:
     """
-    Production-grade web content extractor.
-
     Runs a 4-stage pipeline to turn a URL into clean plain text:
 
     1. :meth:`fetch_html`          — HTTP GET with retry, timeout, and size guards
@@ -179,9 +152,6 @@ class WebExtractor:
 
     The high-level entry point is :meth:`extract_from_url`, which runs the
     full pipeline and returns an :class:`ExtractedPage`.
-
-    The extractor is safe to share across threads (the underlying
-    ``requests.Session`` is thread-safe).
 
     Args:
         timeout:        ``(connect_timeout, read_timeout)`` in seconds.
@@ -199,8 +169,6 @@ class WebExtractor:
         self._timeout = timeout
         self._session = _build_session(retries, backoff_factor)
 
-    # ── Context-manager support ───────────────────────────────────────────────
-
     def close(self) -> None:
         """Release the underlying HTTP session and connection pool."""
         self._session.close()
@@ -211,7 +179,7 @@ class WebExtractor:
     def __exit__(self, *_: Any) -> None:
         self.close()
 
-    # ── Stage 1: Fetch ────────────────────────────────────────────────────────
+    # Stage 1: Fetch
 
     def fetch_html(self, url: str) -> str:
         """
@@ -227,14 +195,6 @@ class WebExtractor:
         Returns:
             Raw HTML string decoded with the charset declared by the server
             (falls back to UTF-8).
-
-        Raises:
-            FetchError: On any of the following:
-                - Network-level failure (DNS, connection refused, etc.)
-                - Read timeout
-                - HTTP status >= 400
-                - Content-Type not in ``_ACCEPTED_CONTENT_TYPES``
-                - Response body exceeds ``_MAX_CONTENT_BYTES``
         """
         logger.debug("Fetching %s", url)
         try:
@@ -272,7 +232,7 @@ class WebExtractor:
         logger.info("Fetched %s — %d bytes, status %d", url, len(response.content), response.status_code)
         return response.text
 
-    # ── Stage 2: HTML → XML ───────────────────────────────────────────────────
+    # Stage 2: HTML → XML
 
     def html_to_xml(self, html: str, url: str = "") -> str:
         """
@@ -284,9 +244,6 @@ class WebExtractor:
 
         Returns:
             Trafilatura XML as a UTF-8 string.
-
-        Raises:
-            ExtractionError: If trafilatura returns no content (e.g. boilerplate-only page).
         """
         xml_str = trafilatura.extract(
             html,
@@ -299,25 +256,11 @@ class WebExtractor:
             raise ExtractionError(url or "<html>", "trafilatura returned no content")
         return xml_str
 
-    # ── Stage 3: XML → structured dict ───────────────────────────────────────
+    # Stage 3: XML → structured dict
 
     def xml_content_formattor(self, xml_str: str) -> Dict[str, Any]:
         """
         Parse a trafilatura XML string into a structured intermediate dict.
-
-        Trafilatura XML schema::
-
-            <doc sitename="…" title="…" date="…">
-              <main>
-                <head rend="h2">Heading text</head>
-                <p>Paragraph text</p>
-                <list>
-                  <item>List item</item>
-                </list>
-                <table>…</table>
-              </main>
-            </doc>
-
         Args:
             xml_str: XML string produced by :meth:`html_to_xml`.
 
@@ -329,9 +272,6 @@ class WebExtractor:
                 {"type": "paragraph", "text": str}
                 {"type": "list",      "items": List[str]}
                 {"type": "table",     "text": str}
-
-        Raises:
-            ParseError: If the XML is malformed.
         """
         try:
             root = ET.fromstring(xml_str.encode("utf-8"))
@@ -382,18 +322,12 @@ class WebExtractor:
         Render the dict produced by :meth:`xml_content_formattor` into
         normalised plain text.
 
-        The title is prepended when present.  List items are rendered with
-        a ``-`` bullet prefix.
-
         Args:
             result: Output of :meth:`xml_content_formattor`.
             url:    Source URL used only in error messages.
 
         Returns:
             Normalised plain-text string.
-
-        Raises:
-            ExtractionError: If the resulting text is empty.
         """
         parts: List[str] = []
 
@@ -412,7 +346,6 @@ class WebExtractor:
             raise ExtractionError(url or "<result>", "No text content after formatting")
         return text
 
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def extract(self, html: str, url: str = "") -> ExtractedPage:
         """
@@ -424,10 +357,6 @@ class WebExtractor:
 
         Returns:
             :class:`ExtractedPage` with title, sitename, date, text, and element count.
-
-        Raises:
-            ExtractionError: If no content could be extracted.
-            ParseError:      If the intermediate XML is malformed.
         """
         xml_str = self.html_to_xml(html, url=url)
         result = self.xml_content_formattor(xml_str)
@@ -445,22 +374,14 @@ class WebExtractor:
         """
         Fetch *url* and run the full extraction pipeline.
 
-        Args:
-            url: Fully-qualified ``http://`` or ``https://`` URL.
+        Args: url
 
         Returns:
             :class:`ExtractedPage` with title, sitename, date, text, and element count.
-
-        Raises:
-            FetchError:      If the URL cannot be fetched.
-            ExtractionError: If no content could be extracted from the page.
-            ParseError:      If the intermediate XML is malformed.
         """
         html = self.fetch_html(url)
         return self.extract(html, url=url)
 
-
-# ── CLI entry point ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import json

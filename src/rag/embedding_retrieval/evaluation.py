@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
-Embedding & Retrieval Evaluation
-=================================
 Compares multiple embedding techniques (dense + sparse) across different k values
 using ground-truth QA pairs with precision, recall, MRR, and F1 metrics.
-
-Usage:
-    python src/rag/embedding_retrieval/evaluation.py [--chunker_output_dir DIR]
 """
 
 import argparse
@@ -18,7 +13,6 @@ import sys
 import time
 from typing import Dict, List
 
-# Ensure parent rag/ directory is importable (for web_processor, pdf_parsing, etc.)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RAG_DIR = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, RAG_DIR)
@@ -56,10 +50,10 @@ def load_chunks_from_chunker_output(chunker_output_dir: str):
     Load chunks from pdf_chunker evaluation output.
 
     Args:
-        chunker_output_dir: Base directory containing *_chunks.jsonl files (e.g., ./out)
+        chunker_output_dir: Base directory containing chunks file
 
     Returns:
-        List of chunk texts from all *_chunks.jsonl files
+        List of chunk texts from all chunk files
     """
     if not os.path.isdir(chunker_output_dir):
         logger.warning(f"Chunker output directory not found: {chunker_output_dir}")
@@ -67,12 +61,12 @@ def load_chunks_from_chunker_output(chunker_output_dir: str):
 
     chunks = []
 
-    # Find all *_chunks.jsonl files
+    # Find all chunk files
     import glob
     chunk_files = glob.glob(os.path.join(chunker_output_dir, "*_chunks.jsonl"))
 
     if not chunk_files:
-        logger.warning(f"No *_chunks.jsonl files found in {chunker_output_dir}")
+        logger.warning(f"No chunk files found in {chunker_output_dir}")
         return []
 
     for chunks_file in sorted(chunk_files):
@@ -102,7 +96,7 @@ def _load_chunks_jsonl(jsonl_path: str) -> List[Dict]:
 
 def gather_all_chunks(chunker_output_dir: str = None) -> List[Dict]:
     """
-    Load full chunk records (with metadata) from *_chunks.jsonl files.
+    Load full chunk records (with metadata) from chunk jsonl files.
     Falls back to wrapping plain text in {"text": ...} dicts for legacy sources.
     """
     if chunker_output_dir and os.path.isdir(chunker_output_dir):
@@ -110,8 +104,6 @@ def gather_all_chunks(chunker_output_dir: str = None) -> List[Dict]:
         if records:
             logger.info(f"Loaded {len(records)} chunk records from chunker output")
             return records
-
-    # Fallback: legacy JSONL without metadata
     logger.info("Loading from legacy sources...")
     all_records = []
 
@@ -126,7 +118,6 @@ def gather_all_chunks(chunker_output_dir: str = None) -> List[Dict]:
                         rec = json.loads(line)
                     except json.JSONDecodeError:
                         rec = ast.literal_eval(line)
-                    # Wrap plain text as record if needed
                     if isinstance(rec, str):
                         rec = {"text": rec, "topics": [], "is_tagged": False}
                     all_records.append(rec)
@@ -134,8 +125,6 @@ def gather_all_chunks(chunker_output_dir: str = None) -> List[Dict]:
 
     return all_records
 
-
-# ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
@@ -188,7 +177,7 @@ def main():
         print(f"  Evaluating: {model.name}")
         print(f"{'─' * 60}")
 
-        # ── Baseline: search all chunks ───────────────────────────────
+        # Baseline (search all chunks)
         start = time.time()
         averaged = evaluator.evaluate_model(model, ground_truth)
         elapsed = time.time() - start
@@ -214,7 +203,7 @@ def main():
                 "f1": round(metrics["f1"], 4),
             })
 
-        # ── Filtered: search only topic-tagged chunks ─────────────────
+        # Filtered (search only topic-tagged chunks)
         start = time.time()
         filtered = evaluator.evaluate_model_filtered(model, ground_truth)
         elapsed_f = time.time() - start
@@ -231,7 +220,7 @@ def main():
                 "f1": round(metrics["f1"], 4),
             })
 
-        # ── Profession-filtered: search only profession-specific chunks ───
+        # Profession-filtered (search only profession-specific chunks)
         start = time.time()
         prof_filtered = evaluator.evaluate_model_profession_filtered(model, ground_truth)
         elapsed_p = time.time() - start
@@ -250,9 +239,7 @@ def main():
 
         # Detailed per-query results (baseline)
         detail_rows.extend(evaluator.evaluate_model_detailed(model, ground_truth))
-
-    # ── Save CSVs ────────────────────────────────────────────────────────
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True) # save csvs
 
     # Summary CSV (baseline)
     with open(SUMMARY_CSV, "w", newline="") as f:
@@ -291,98 +278,6 @@ def main():
         writer.writeheader()
         writer.writerows(profession_rows)
     print(f"Profession filter comparison saved to: {PROFESSION_CSV}")
-
-    # ── Console summary table ────────────────────────────────────────────
-    print(f"\n{'=' * 80}")
-    print("  RESULTS SUMMARY")
-    print(f"{'=' * 80}\n")
-
-    # Build a pivot-style table: rows = models, columns = k values × metrics
-    model_names = list(dict.fromkeys(r["model"] for r in summary_rows))
-
-    # Table 1: Precision@k
-    _print_metric_table("Precision@k", summary_rows, model_names, K_VALUES, "precision")
-    # Table 2: Recall@k
-    _print_metric_table("Recall@k", summary_rows, model_names, K_VALUES, "recall")
-    # Table 3: MRR@k
-    _print_metric_table("MRR@k", summary_rows, model_names, K_VALUES, "mrr")
-    # Table 4: F1@k
-    _print_metric_table("F1@k", summary_rows, model_names, K_VALUES, "f1")
-
-    # Metadata filter comparison: baseline vs topic_filtered
-    print(f"\n{'─' * 80}")
-    print("  Metadata Filter Comparison — Baseline vs Topic-Filtered (F1)")
-    print(f"{'─' * 80}")
-    headers = ["Model", "k"] + ["Baseline F1", "Filtered F1", "Delta"]
-    frows = []
-    for model_name in model_names:
-        for k in K_VALUES:
-            base = next((r for r in filter_rows if r["model"] == model_name and r["k"] == k and r["mode"] == "baseline"), None)
-            filt = next((r for r in filter_rows if r["model"] == model_name and r["k"] == k and r["mode"] == "topic_filtered"), None)
-            if base and filt:
-                delta = round(filt["f1"] - base["f1"], 4)
-                sign = "+" if delta >= 0 else ""
-                frows.append([model_name, k, base["f1"], filt["f1"], f"{sign}{delta}"])
-    print(tabulate(frows, headers=headers, tablefmt="simple"))
-
-    # Profession filter comparison: baseline vs profession_filtered
-    print(f"\n{'─' * 80}")
-    print("  Profession Filter Comparison — Baseline vs Profession-Filtered (F1)")
-    print(f"{'─' * 80}")
-    headers = ["Model", "k"] + ["Baseline F1", "Profession F1", "Delta"]
-    prows = []
-    for model_name in model_names:
-        for k in K_VALUES:
-            base = next((r for r in filter_rows if r["model"] == model_name and r["k"] == k and r["mode"] == "baseline"), None)
-            prof = next((r for r in profession_rows if r["model"] == model_name and r["k"] == k and r["mode"] == "profession_filtered"), None)
-            if base and prof:
-                delta = round(prof["f1"] - base["f1"], 4)
-                sign = "+" if delta >= 0 else ""
-                prows.append([model_name, k, base["f1"], prof["f1"], f"{sign}{delta}"])
-    print(tabulate(prows, headers=headers, tablefmt="simple"))
-
-    # Combined compact table
-    print(f"\n{'─' * 80}")
-    print("  Combined (P / R / F1 / MRR)")
-    print(f"{'─' * 80}")
-    headers = ["Model"] + [f"k={k}" for k in K_VALUES]
-    rows = []
-    for model_name in model_names:
-        row = [model_name]
-        for k in K_VALUES:
-            entry = next(
-                r for r in summary_rows if r["model"] == model_name and r["k"] == k
-            )
-            cell = (
-                f"{entry['precision']:.2f} / {entry['recall']:.2f} / "
-                f"{entry['f1']:.2f} / {entry['mrr']:.2f}"
-            )
-            row.append(cell)
-        rows.append(row)
-    print(tabulate(rows, headers=headers, tablefmt="grid"))
-    print()
-
-
-def _print_metric_table(
-    title: str,
-    summary_rows: list,
-    model_names: list,
-    k_values: list,
-    metric_key: str,
-):
-    print(f"\n  {title}")
-    headers = ["Model"] + [f"k={k}" for k in k_values]
-    rows = []
-    for model_name in model_names:
-        row = [model_name]
-        for k in k_values:
-            entry = next(
-                r for r in summary_rows if r["model"] == model_name and r["k"] == k
-            )
-            row.append(f"{entry[metric_key]:.4f}")
-        rows.append(row)
-    print(tabulate(rows, headers=headers, tablefmt="simple"))
-
 
 if __name__ == "__main__":
     main()

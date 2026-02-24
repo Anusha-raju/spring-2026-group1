@@ -1,25 +1,9 @@
 """
-extract_urls.py
-===============
 Reads the per-profession CSV files and returns URL records.
-
-Each record is a dict::
-
-    {
-        "url":        str,
-        "categories": List[str],   # all professions this URL is relevant to
-        "source":     str,         # always "website" for web URLs
-    }
-
-The same URL may appear in multiple CSVs (e.g. a CDC page referenced by both
-Nurse and PA programmes).  ``extract_all_urls()`` deduplicates by URL and
-merges categories so each URL is fetched and stored exactly once.
 """
 
 from __future__ import annotations
-
 from typing import Any, Dict, List
-
 import pandas as pd
 
 # Map CSV file path → category label
@@ -33,7 +17,7 @@ _SOURCES: Dict[str, str] = {
 
 def _extract_from_csv(csv_path: str, category: str) -> List[Dict[str, Any]]:
     """
-    Return URL records from a single CSV where Type is 'website' and Needed is 'y'.
+    Return URL records from a single CSV where Type is 'website'.
 
     Args:
         csv_path: Relative path to the CSV file.
@@ -82,8 +66,6 @@ def extract_all_urls() -> List[Dict[str, Any]]:
 
     return list(seen.values())
 
-
-# ── Per-profession helpers (kept for backward compatibility) ──────────────────
 
 def extract_nurse() -> List[Dict[str, Any]]:
     """Return URL records for the Nurse programme."""

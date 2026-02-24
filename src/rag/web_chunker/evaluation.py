@@ -1,35 +1,7 @@
 """
-web_chunker/evaluation.py
-=========================
 Chunks web pages extracted by web_processor.py and saves the results as
 ``*_chunks.jsonl`` — the same format produced by pdf_chunker, so both
 sources feed into the same embedding retrieval pipeline.
-
-Input:  ``src/rag/web_extractor/outputs/*.json``
-        Each file has: url, title, sitename, date, categories, source, text
-
-Output: ``<out_dir>/*_chunks.jsonl``
-        One JSON line per chunk::
-
-            {
-              "chunk_id":   "<doc_id>::sentence_pack::<n>",
-              "doc_id":     "<safe_filename>.json",
-              "source":     "website",
-              "url":        "https://...",
-              "title":      "...",
-              "categories": ["Nurse", "PA"],
-              "text":       "...",
-              "token_count": 412,
-              "topics":     ["treatment", "naloxone"],
-              "is_tagged":  true
-            }
-
-Usage::
-
-    python src/rag/web_chunker/evaluation.py \\
-        --json_dir  src/rag/web_extractor/outputs \\
-        --out_dir   ./out \\
-        --target_tokens 600
 """
 
 from __future__ import annotations
@@ -43,17 +15,12 @@ from typing import Any, Dict, List, Tuple
 
 import nltk
 from nltk.tokenize import sent_tokenize
+from chunkers import chunk_sentence_pack       
+from dataclass import Chunk                    
+from utils import estimate_tokens, normalize_text
 
-# ── Reuse shared utilities from pdf_chunker ────────────────────────────────────
 _PDF_CHUNKER_DIR = os.path.join(os.path.dirname(__file__), "..", "pdf_chunker")
 sys.path.insert(0, os.path.abspath(_PDF_CHUNKER_DIR))
-
-from chunkers import chunk_sentence_pack       # noqa: E402
-from dataclass import Chunk                    # noqa: E402
-from utils import estimate_tokens, normalize_text  # noqa: E402
-
-
-# ── Opioid topic tagging (mirrors pdf_chunker) ─────────────────────────────────
 
 OPIOID_TOPICS: Dict[str, List[str]] = {
     "overdose": [
@@ -108,9 +75,7 @@ def tag_chunk(text: str) -> Dict[str, Any]:
     ]
     return {"topics": matched, "is_tagged": len(matched) > 0}
 
-
-# ── I/O ────────────────────────────────────────────────────────────────────────
-
+# Main processing pipeline
 def load_web_pages(json_dir: str) -> List[Dict[str, Any]]:
     """
     Load all ``*.json`` files from *json_dir*.
@@ -134,9 +99,6 @@ def load_web_pages(json_dir: str) -> List[Dict[str, Any]]:
         pages.append(page)
 
     return pages
-
-
-# ── Chunking ───────────────────────────────────────────────────────────────────
 
 def chunk_page(
     page: Dict[str, Any],
@@ -176,8 +138,7 @@ def chunk_page(
     return records
 
 
-# ── Save ───────────────────────────────────────────────────────────────────────
-
+""" Save chunks in the same format as pdf_chunker for downstream embedding/retrieval evaluation."""
 def save_chunks(
     doc_id: str,
     chunk_records: List[Dict[str, Any]],
@@ -199,8 +160,6 @@ def save_chunks(
     )
 
 
-# ── Runner ─────────────────────────────────────────────────────────────────────
-
 def run(json_dir: str, out_dir: str, target_tokens: int = 600) -> None:
     pages = load_web_pages(json_dir)
     print(f"Loaded {len(pages)} web pages from '{json_dir}'")
@@ -217,9 +176,6 @@ def run(json_dir: str, out_dir: str, target_tokens: int = 600) -> None:
         total_chunks += len(chunk_records)
 
     print(f"\nDone. {total_chunks} total chunks saved to '{out_dir}'")
-
-
-# ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(

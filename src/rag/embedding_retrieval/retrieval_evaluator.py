@@ -24,13 +24,13 @@ class RetrievalEvaluator:
     def __init__(self, chunk_records: List[Dict], k_values: List[int]):
         """
         Args:
-            chunk_records: List of chunk dicts with at least {"text": ..., "topics": [...]}
+            chunk_records: List of chunk dicts
             k_values: List of k values to evaluate at
         """
         self.chunk_records = chunk_records
         self.chunks = [r["text"] if isinstance(r, dict) else r for r in chunk_records]
         self.k_values = k_values
-        self._corpus_cache: Dict = {}  # model.name -> corpus_embeddings
+        self._corpus_cache: Dict = {}
 
     def _get_corpus_embeddings(self, model: "EmbeddingModel"):
         """Encode corpus once per model and reuse across all evaluate_* calls."""
