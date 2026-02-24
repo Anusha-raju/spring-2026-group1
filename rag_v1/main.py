@@ -7,7 +7,7 @@ from utils import detect_scenario_with_groq, overall_scenario_distribution, buil
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from groq import Groq
-from embedding_processor import EmbeddingProcessor
+from rag_v1.embedding_processor import EmbeddingProcessor
 
 configs = [
     {

@@ -1,19 +1,29 @@
+# PDF Extraction
 pypdf
-langchain-text-splitters
-langchain-chroma
-sentence-transformers
-pymilvus[milvus_lite]
-langchain-huggingface
-langchain-milvus
-groq
-langchain-core
-requests
-trafilatura
-lxml
+pdfplumber
+pdfminer.six
+PyMuPDF
+Pillow
+
+# Chunking
+nltk
 tiktoken
-psycopg2-binary
-pgvector
+
+# Embeddings & Retrieval
+sentence-transformers
+transformers
+torch
+faiss-cpu
 rank-bm25
 scikit-learn
 openai
+
+# Web Extraction
+trafilatura
+lxml
+requests
+
+# Data & Evaluation
+numpy
+pandas
 tabulate

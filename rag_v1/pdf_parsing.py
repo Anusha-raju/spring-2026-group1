@@ -325,7 +325,7 @@ class HybridPDFParser:
             base, _ = os.path.splitext(output_path)
             chunk_output_path = f"{base}_chunks.jsonl"
         try:
-            from chunk_markdown import chunk_markdown_file
+            from rag_v1.chunk_markdown import chunk_markdown_file
             chunk_markdown_file(output_path, chunk_output_path)
         except Exception as e:
             print(f"⚠️  Chunking Markdown failed: {e}")

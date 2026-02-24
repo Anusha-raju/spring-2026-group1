@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Embedding & Retrieval Comparison Pipeline
-==========================================
+Embedding & Retrieval Evaluation
+=================================
 Compares multiple embedding techniques (dense + sparse) across different k values
 using ground-truth QA pairs with precision, recall, MRR, and F1 metrics.
 
 Usage:
-    python src/rag/evaluation/run_comparison.py
+    python src/rag/embedding_retrieval/evaluation.py [--chunker_output_dir DIR]
 """
 
+import argparse
 import csv
 import json
 import logging
@@ -41,11 +42,66 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
 DETAIL_CSV = os.path.join(OUTPUT_DIR, "comparison_results.csv")
 SUMMARY_CSV = os.path.join(OUTPUT_DIR, "comparison_summary.csv")
 
+# Chunker output path
+DEFAULT_CHUNKER_OUTPUT = os.path.join(PROJECT_ROOT, "out")
+
 
 # ── Chunk loading ────────────────────────────────────────────────────────────
 
+def load_chunks_from_chunker_output(chunker_output_dir: str):
+    """
+    Load chunks from pdf_chunker evaluation output.
+
+    Args:
+        chunker_output_dir: Base directory containing *_chunks.jsonl files (e.g., ./out)
+
+    Returns:
+        List of chunk texts from all *_chunks.jsonl files
+    """
+    if not os.path.isdir(chunker_output_dir):
+        logger.warning(f"Chunker output directory not found: {chunker_output_dir}")
+        return []
+
+    chunks = []
+
+    # Find all *_chunks.jsonl files
+    import glob
+    chunk_files = glob.glob(os.path.join(chunker_output_dir, "*_chunks.jsonl"))
+
+    if not chunk_files:
+        logger.warning(f"No *_chunks.jsonl files found in {chunker_output_dir}")
+        return []
+
+    for chunks_file in sorted(chunk_files):
+        file_chunks = _load_chunks_jsonl(chunks_file)
+        filename = os.path.basename(chunks_file)
+        logger.info(f"Loaded {len(file_chunks)} chunks from {filename}")
+        chunks.extend(file_chunks)
+
+    return chunks
+
+
+def _load_chunks_jsonl(jsonl_path: str):
+    """Load chunks from a JSONL file with chunk data."""
+    chunks = []
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+                chunks.append(record.get("text", ""))
+            except json.JSONDecodeError:
+                # Fallback for Python dict repr
+                import ast
+                record = ast.literal_eval(line)
+                chunks.append(record.get("text", ""))
+    return chunks
+
+
 def load_chunks_from_jsonl(path: str):
-    """Load chunks from the existing JSONL output file."""
+    """Load chunks from the existing JSONL output file (legacy format)."""
     chunks = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -71,8 +127,23 @@ def load_chunks_from_markdown(path: str):
     return chunks
 
 
-def gather_all_chunks():
-    """Collect chunks from all available sources."""
+def gather_all_chunks(chunker_output_dir: str = None):
+    """
+    Collect chunks from available sources.
+
+    Priority:
+    1. If chunker_output_dir specified, load from *_chunks.jsonl files
+    2. Otherwise, fall back to legacy sources (web JSONL, hybrid markdown)
+    """
+    # Try loading from chunker output first
+    if chunker_output_dir and os.path.isdir(chunker_output_dir):
+        chunks = load_chunks_from_chunker_output(chunker_output_dir)
+        if chunks:
+            logger.info(f"Loaded {len(chunks)} total chunks from chunker output")
+            return chunks
+
+    # Fallback to legacy sources
+    logger.info("Loading from legacy sources (web JSONL, hybrid markdown)...")
     all_chunks = []
 
     # Web chunks from JSONL
@@ -102,15 +173,27 @@ def gather_all_chunks():
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Evaluate embedding models on chunked data"
+    )
+    parser.add_argument(
+        "--chunker_output_dir",
+        default=DEFAULT_CHUNKER_OUTPUT,
+        help="Directory containing *_chunks.jsonl files from pdf_chunker evaluation (default: ./out)",
+    )
+    args = parser.parse_args()
+
     print("=" * 80)
     print("  EMBEDDING & RETRIEVAL COMPARISON PIPELINE")
     print("=" * 80)
 
     # 1. Load chunks
     print("\n[1/4] Loading chunks...")
-    chunks = gather_all_chunks()
+    print(f"  Chunker output directory: {args.chunker_output_dir}")
+
+    chunks = gather_all_chunks(args.chunker_output_dir)
     if not chunks:
-        print("ERROR: No chunks found. Run the main RAG pipeline first.")
+        print("ERROR: No chunks found. Run the pdf_chunker evaluation first.")
         sys.exit(1)
     print(f"  Total chunks: {len(chunks)}")
 
