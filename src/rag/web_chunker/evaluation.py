@@ -13,14 +13,14 @@ import os
 import sys
 from typing import Any, Dict, List, Tuple
 
-import nltk
-from nltk.tokenize import sent_tokenize
-from chunkers import chunk_sentence_pack       
-from dataclass import Chunk                    
-from utils import estimate_tokens, normalize_text
-
 _PDF_CHUNKER_DIR = os.path.join(os.path.dirname(__file__), "..", "pdf_chunker")
 sys.path.insert(0, os.path.abspath(_PDF_CHUNKER_DIR))
+
+import nltk
+from nltk.tokenize import sent_tokenize
+from chunkers import chunk_sentence_pack
+from dataclass import Chunk
+from utils import estimate_tokens, normalize_text
 
 OPIOID_TOPICS: Dict[str, List[str]] = {
     "overdose": [

@@ -2,6 +2,9 @@
 """
 Compares multiple embedding techniques (dense + sparse) across different k values
 using ground-truth QA pairs with precision, recall, MRR, and F1 metrics.
+
+USE_PINECONE=false (default): runs all models with numpy (full comparison mode).
+USE_PINECONE=true:            uses MPNet at k=5 via Pinecone (production mode).
 """
 
 import argparse
@@ -13,6 +16,9 @@ import sys
 import time
 from typing import Dict, List
 
+from dotenv import load_dotenv
+load_dotenv()
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RAG_DIR = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, RAG_DIR)
@@ -20,8 +26,11 @@ sys.path.insert(0, SCRIPT_DIR)
 
 from tabulate import tabulate
 
-from embedding_models import get_all_models, BGESmallEmbedding
+from embedding_models import get_all_models, MPNetEmbedding, BGESmallEmbedding
 from retrieval_evaluator import RetrievalEvaluator
+
+USE_PINECONE = os.getenv("USE_PINECONE", "false").strip().lower() == "true"
+PRODUCTION_K = 5  # best k, used in Pinecone mode
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -126,6 +135,86 @@ def gather_all_chunks(chunker_output_dir: str = None) -> List[Dict]:
     return all_records
 
 
+def evaluate_with_pinecone(chunks: List[Dict], ground_truth: List[Dict]) -> None:
+    """
+    Production evaluation path: MPNet at k=5 via Pinecone.
+    Computes metrics against ground truth using Pinecone as the retriever.
+    """
+    from pinecone_store import build_store_from_env
+    from retrieval_evaluator import is_chunk_relevant
+
+    model = MPNetEmbedding()
+    store = build_store_from_env(model, index_name="bridge-rag")
+
+    # Build chunk_id → index map so Pinecone results can be scored
+    chunk_id_to_idx = {r["chunk_id"]: i for i, r in enumerate(chunks)}
+    chunk_texts = [r["text"] for r in chunks]
+
+    print(f"\n  Upserting {len(chunks)} chunks to Pinecone (skipped if already present)...")
+    store.upsert_chunks(chunks)
+
+    print(f"\n  Evaluating MPNet k={PRODUCTION_K} via Pinecone...")
+    summary_rows = []
+
+    for query_gt in ground_truth:
+        query = query_gt["query"]
+        keywords = query_gt["relevant_keywords"]
+        min_matches = query_gt.get("min_keyword_matches", 2)
+        relevant_indices = [
+            i for i, t in enumerate(chunk_texts)
+            if is_chunk_relevant(t, keywords, min_matches)
+        ]
+
+        results = store.query(query, k=PRODUCTION_K)
+        retrieved_indices = [
+            chunk_id_to_idx[r["chunk_id"]]
+            for r in results
+            if r["chunk_id"] in chunk_id_to_idx
+        ]
+
+        relevant_set = set(relevant_indices)
+        retrieved_set = set(retrieved_indices[:PRODUCTION_K])
+        hits = relevant_set & retrieved_set
+
+        precision = len(hits) / PRODUCTION_K if PRODUCTION_K > 0 else 0.0
+        recall = len(hits) / len(relevant_set) if relevant_set else 0.0
+        mrr = 0.0
+        for rank, idx in enumerate(retrieved_indices[:PRODUCTION_K], start=1):
+            if idx in relevant_set:
+                mrr = 1.0 / rank
+                break
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+        summary_rows.append({
+            "model": "MPNet-base-v2 (Pinecone)",
+            "k": PRODUCTION_K,
+            "query": query,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "mrr": round(mrr, 4),
+            "f1": round(f1, 4),
+        })
+
+    # Print table
+    print(tabulate(
+        [[r["query"][:50], r["precision"], r["recall"], r["mrr"], r["f1"]] for r in summary_rows],
+        headers=["Query", "Precision", "Recall", "MRR", "F1"],
+        floatfmt=".4f",
+    ))
+
+    # Save CSV
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    pinecone_csv = os.path.join(OUTPUT_DIR, "pinecone_summary.csv")
+    with open(pinecone_csv, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["model", "k", "query", "precision", "recall", "mrr", "f1"])
+        writer.writeheader()
+        writer.writerows(summary_rows)
+    print(f"\n  Results saved to: {pinecone_csv}")
+
+    stats = store.stats()
+    print(f"  Pinecone index total vectors: {stats.get('total_vector_count', 'N/A')}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Evaluate embedding models on chunked data"
@@ -139,6 +228,10 @@ def main():
 
     print("=" * 80)
     print("  EMBEDDING & RETRIEVAL COMPARISON PIPELINE")
+    if USE_PINECONE:
+        print("  MODE: Pinecone (MPNet, k=5)")
+    else:
+        print("  MODE: Numpy (all models, all k)")
     print("=" * 80)
 
     # 1. Load chunks
@@ -158,7 +251,12 @@ def main():
         ground_truth = json.load(f)
     print(f"  Total queries: {len(ground_truth)}")
 
-    # 3. Initialize models
+    # Branch: Pinecone mode (MPNet k=5 only) or numpy mode (all models)
+    if USE_PINECONE:
+        evaluate_with_pinecone(chunks, ground_truth)
+        return
+
+    # 3. Initialize models (numpy mode only)
     print("\n[3/4] Initializing embedding models...")
     models = get_all_models(include_openai=False)
     print(f"  Models: {', '.join(m.name for m in models)}")

@@ -17,6 +17,8 @@ faiss-cpu
 rank-bm25
 scikit-learn
 openai
+InstructorEmbedding
+pinecone
 
 # Web Extraction
 trafilatura
@@ -27,3 +29,4 @@ requests
 numpy
 pandas
 tabulate
+python-dotenv
