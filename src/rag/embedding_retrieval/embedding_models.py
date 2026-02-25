@@ -94,6 +94,30 @@ class BGESmallEmbedding(SentenceTransformerEmbedding):
         super().__init__("BAAI/bge-small-en-v1.5", "BGE-small-en")
 
 
+# class InstructorXLEmbedding(EmbeddingModel):
+#     """
+#     HKUNLP Instructor-XL — instruction-tuned embedding model.
+#     Uses task-specific instruction prefixes for corpus and query encoding.
+#     Forced to CPU to avoid MPS out-of-memory on Apple Silicon.
+#     """
+
+#     name = "Instructor-XL"
+
+#     CORPUS_INSTRUCTION = "Represent the medical document for retrieval:"
+#     QUERY_INSTRUCTION = "Represent the medical question for retrieving relevant documents:"
+
+#     def __init__(self):
+#         from InstructorEmbedding import INSTRUCTOR
+#         self._model = INSTRUCTOR("hkunlp/instructor-xl", device="cpu")
+
+#     def encode(self, texts: List[str]) -> np.ndarray:
+#         pairs = [[self.CORPUS_INSTRUCTION, t] for t in texts]
+#         return self._model.encode(pairs, batch_size=16, show_progress_bar=True)
+
+#     def encode_query(self, query: str) -> np.ndarray:
+#         return self._model.encode([[self.QUERY_INSTRUCTION, query]])[0]
+
+
 # Dense: OpenAI
 
 class OpenAIEmbedding(EmbeddingModel):
@@ -232,4 +256,8 @@ def get_all_models(include_openai: bool = True) -> List[EmbeddingModel]:
             models.insert(3, OpenAIEmbedding())
         except (ValueError, ImportError) as e:
             logger.warning(f"Skipping OpenAI embeddings: {e}")
+    # try:
+    #     models.append(InstructorXLEmbedding())
+    # except (ImportError, Exception) as e:
+    #     logger.warning(f"Skipping Instructor-XL: {e}")
     return models
