@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -21,6 +22,17 @@ logger = logging.getLogger(__name__)
 # Adjust UPSERT_BATCH_SIZE if you hit rate limits.
 UPSERT_BATCH_SIZE = 100
 
+
+def _ascii_id(chunk_id: str) -> str:
+    """Return an ASCII-safe version of chunk_id for Pinecone vector IDs.
+
+    Pinecone requires vector IDs to be ASCII-only. This normalises unicode
+    (e.g. em-dashes, accented letters) via NFKD decomposition, then drops
+    any remaining non-ASCII bytes.  The resulting ID stays unique because
+    the numeric suffix (::sentence_pack::N) is always ASCII.
+    """
+    normalised = unicodedata.normalize("NFKD", chunk_id)
+    return normalised.encode("ascii", "ignore").decode("ascii")
 
 class PineconeVectorStore:
     """
@@ -101,7 +113,7 @@ class PineconeVectorStore:
         vectors = []
         for record, emb in zip(chunk_records, embeddings):
             vectors.append({
-                "id": record["chunk_id"],
+                "id": _ascii_id(record["chunk_id"]),
                 "values": emb.tolist(),
                 "metadata": {
                     "text":       record.get("text", ""),
