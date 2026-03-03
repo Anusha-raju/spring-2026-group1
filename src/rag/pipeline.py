@@ -99,67 +99,6 @@ def _print_table(title: str, headers: list[str], rows: list[list]) -> None:
     print(sep)
 
 
-def _print_results_summary(outputs_dir: Path) -> None:
-    """Print retrieval summary and metadata filter comparison after evaluation."""
-
-    summary_rows = _read_csv(outputs_dir / "comparison_summary.csv")
-    filter_rows  = _read_csv(outputs_dir / "metadata_filter_comparison.csv")
-
-    print("\n" + "=" * 70)
-    print("  RESULTS SUMMARY")
-    print("=" * 70)
-
-    # ── Retrieval summary (precision / recall / MRR / F1 per model+k) ─────
-    if summary_rows:
-        table = [
-            [
-                r["model"], r["k"],
-                r["precision"], r["recall"], r["mrr"], r["f1"], r["time_sec"],
-            ]
-            for r in summary_rows
-        ]
-        _print_table(
-            "Retrieval Metrics (Baseline)",
-            ["Model", "k", "Precision", "Recall", "MRR", "F1", "Time(s)"],
-            table,
-        )
-    else:
-        print("\n  [No comparison_summary.csv found]")
-
-    # ── Metadata filter comparison (baseline vs topic-filtered) ───────────
-    if filter_rows:
-        # Group by model+k, pair baseline vs topic_filtered
-        pairs: dict[tuple, dict] = {}
-        for r in filter_rows:
-            key = (r["model"], r["k"])
-            pairs.setdefault(key, {})
-            pairs[key][r["mode"]] = r
-
-        table = []
-        for (model, k), modes in pairs.items():
-            base = modes.get("baseline",       {})
-            filt = modes.get("topic_filtered", {})
-            if not base or not filt:
-                continue
-            delta = round(float(filt["f1"]) - float(base["f1"]), 4)
-            sign  = "+" if delta >= 0 else ""
-            table.append([
-                model, k,
-                base["f1"], filt["f1"], f"{sign}{delta}",
-                base["precision"], filt["precision"],
-                base["recall"],    filt["recall"],
-            ])
-
-        _print_table(
-            "Metadata Filter Comparison — Baseline vs Topic-Filtered",
-            ["Model", "k", "Base F1", "Filt F1", "ΔF1",
-             "Base P", "Filt P", "Base R", "Filt R"],
-            table,
-        )
-    else:
-        print("\n  [No metadata_filter_comparison.csv found]")
-
-
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
 def run_pipeline(
@@ -255,9 +194,6 @@ def run_pipeline(
     print("=" * 70)
     print(f"  Chunks        : {chunks_dir}/")
     print(f"  Results       : {PROJECT_ROOT}/outputs/")
-
-    if not skip_eval:
-        _print_results_summary(PROJECT_ROOT / "outputs")
     print()
 
 
