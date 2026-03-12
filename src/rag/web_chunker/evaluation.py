@@ -160,7 +160,7 @@ def save_chunks(
     )
 
 
-def run(json_dir: str, out_dir: str, target_tokens: int = 600) -> None:
+def run(json_dir: str, out_dir: str, target_tokens: int = 7000) -> None:
     pages = load_web_pages(json_dir)
     print(f"Loaded {len(pages)} web pages from '{json_dir}'")
 

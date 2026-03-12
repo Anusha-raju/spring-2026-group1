@@ -228,6 +228,54 @@ def build_chunks_for_method(
 
 
 # ----------------------------
+# PDF category lookup (from pdf_categories.csv)
+# ----------------------------
+
+import csv as _csv
+
+_PDF_CATEGORIES_CSV = os.path.join(os.path.dirname(__file__), "..", "pdf_categories.csv")
+
+def _normalize(name: str) -> str:
+    name = os.path.splitext(name)[0].lower()
+    return re.sub(r"[^a-z0-9]", "", name)
+
+def _parse_roles(role_str: str) -> List[str]:
+    role_map = {"public health": "Public_Health", "social work": "Social_Work",
+                "nurse": "Nurse", "pa": "PA", "pharmd": "PharmD",
+                "general": "General", "health administrator": "Health_Administrator",
+                "physical therapist": "Physical_Therapist"}
+    roles = []
+    for r in role_str.split(","):
+        r = r.strip().lower()
+        roles.append(role_map.get(r, r.title()))
+    return [r for r in roles if r]
+
+def _load_pdf_category_map() -> Dict[str, List[str]]:
+    mapping: Dict[str, List[str]] = {}
+    if not os.path.exists(_PDF_CATEGORIES_CSV):
+        return mapping
+    with open(_PDF_CATEGORIES_CSV, "r", encoding="utf-8") as f:
+        reader = _csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            fname = row.get("parsed file", "").strip()
+            role_str = row.get("Role", "").strip()
+            if fname and role_str:
+                mapping[_normalize(fname)] = _parse_roles(role_str)
+    return mapping
+
+_PDF_CATEGORY_MAP = _load_pdf_category_map()
+
+def _get_pdf_categories(doc_id: str) -> List[str]:
+    key = _normalize(doc_id)
+    if key in _PDF_CATEGORY_MAP:
+        return _PDF_CATEGORY_MAP[key]
+    for csv_key, cats in _PDF_CATEGORY_MAP.items():
+        if csv_key in key or key in csv_key:
+            return cats
+    return []
+
+
+# ----------------------------
 # Save chunked data
 # ----------------------------
 
@@ -244,6 +292,8 @@ def save_chunked_data(
     for doc_id, chunks in chunks_by_file.items():
         base_name = os.path.splitext(doc_id)[0]
         chunks_file = os.path.join(out_dir, f"{base_name}_chunks.jsonl")
+        categories = _get_pdf_categories(doc_id)
+        title = base_name.replace("-", " ").replace("_", " ")
 
         tagged_count = 0
         with open(chunks_file, "w", encoding="utf-8") as f:
@@ -254,7 +304,9 @@ def save_chunked_data(
                 record = {
                     "chunk_id": chunk.chunk_id,
                     "doc_id": chunk.doc_id,
+                    "title": title,
                     "source": "pdf",
+                    "categories": categories,
                     "text": chunk.text,
                     "token_count": estimate_tokens(chunk.text),
                     "topics": tags["topics"],
@@ -263,7 +315,8 @@ def save_chunked_data(
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
         print(f"  Saved {len(chunks)} chunks → {chunks_file} "
-              f"({tagged_count} tagged, {len(chunks) - tagged_count} untagged)")
+              f"({tagged_count} tagged, {len(chunks) - tagged_count} untagged)"
+              f" categories={categories}")
 
 
 # ----------------------------
@@ -275,7 +328,7 @@ def run_experiment(
     question_json: str,
     out_dir: str,
     k: int = 3,
-    target_tokens: int = 600,
+    target_tokens: int = 7000,
     embed_model_name: str = DEFAULT_EMBED_MODEL,
 ) -> None:
     os.makedirs(out_dir, exist_ok=True)

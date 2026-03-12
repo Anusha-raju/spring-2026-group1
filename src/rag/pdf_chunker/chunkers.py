@@ -10,7 +10,7 @@ from utils import detect_heading, split_paragraphs, estimate_tokens, _cos_sim
 
 DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-def chunk_fixed(text: str, doc_id: str, target_tokens: int = 600) -> List[Chunk]:
+def chunk_fixed(text: str, doc_id: str, target_tokens: int = 7000) -> List[Chunk]:
     words = re.findall(r"\S+", text)
     if not words:
         return []
@@ -25,7 +25,7 @@ def chunk_fixed(text: str, doc_id: str, target_tokens: int = 600) -> List[Chunk]
         start = end
     return chunks
 
-def chunk_fixed_overlap(text: str, doc_id: str, target_tokens: int = 600, overlap_tokens: int = 120) -> List[Chunk]:
+def chunk_fixed_overlap(text: str, doc_id: str, target_tokens: int = 7000, overlap_tokens: int = 120) -> List[Chunk]:
     words = re.findall(r"\S+", text)
     if not words:
         return []
@@ -45,7 +45,7 @@ def chunk_fixed_overlap(text: str, doc_id: str, target_tokens: int = 600, overla
         start += step
     return chunks
 
-def chunk_recursive(text: str, doc_id: str, target_tokens: int = 600) -> List[Chunk]:
+def chunk_recursive(text: str, doc_id: str, target_tokens: int = 7000) -> List[Chunk]:
     lines = text.splitlines()
     blocks: List[str] = []
     buf: List[str] = []
@@ -116,7 +116,7 @@ def chunk_recursive(text: str, doc_id: str, target_tokens: int = 600) -> List[Ch
     flush()
     return chunks
 
-def chunk_sentence_pack(text: str, doc_id: str, target_tokens: int = 600) -> List[Chunk]:
+def chunk_sentence_pack(text: str, doc_id: str, target_tokens: int = 7000) -> List[Chunk]:
     sents = sent_tokenize(text)
     if not sents:
         return chunk_fixed(text, doc_id, target_tokens)
@@ -162,7 +162,7 @@ def chunk_semantic(
     text: str,
     doc_id: str,
     model: SentenceTransformer,
-    target_tokens: int = 600,
+    target_tokens: int = 7000,
     min_tokens: int = 200,
     topic_shift_threshold: float = 0.72,
     window: int = 2,

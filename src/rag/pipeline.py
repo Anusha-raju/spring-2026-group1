@@ -69,36 +69,6 @@ def _run(cmd: list[str], step_name: str) -> None:
     print(f"\n  Completed in {elapsed:.1f}s")
 
 
-# ── Results summary ───────────────────────────────────────────────────────────
-
-def _read_csv(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    with open(path, newline="") as f:
-        return list(csv.DictReader(f))
-
-
-def _col_width(rows: list[list], headers: list[str]) -> list[int]:
-    widths = [len(h) for h in headers]
-    for row in rows:
-        for i, cell in enumerate(row):
-            widths[i] = max(widths[i], len(str(cell)))
-    return widths
-
-
-def _print_table(title: str, headers: list[str], rows: list[list]) -> None:
-    widths = _col_width(rows, headers)
-    sep = "  " + "-+-".join("-" * w for w in widths)
-    fmt = "  " + " | ".join(f"{{:<{w}}}" for w in widths)
-    print(f"\n  {title}")
-    print(sep)
-    print(fmt.format(*headers))
-    print(sep)
-    for row in rows:
-        print(fmt.format(*[str(c) for c in row]))
-    print(sep)
-
-
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
 def run_pipeline(
