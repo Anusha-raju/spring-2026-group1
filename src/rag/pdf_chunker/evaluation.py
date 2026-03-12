@@ -228,36 +228,28 @@ def build_chunks_for_method(
 
 
 # ----------------------------
-# PDF category lookup (from pdf_categories.csv)
+# PDF category lookup (from pdf_knowledge.csv)
 # ----------------------------
 
 import csv as _csv
 
-_PDF_CATEGORIES_CSV = os.path.join(os.path.dirname(__file__), "..", "pdf_categories.csv")
+_PDF_KNOWLEDGE_CSV = os.path.join(os.path.dirname(__file__), "..", "pdf_knowledge.csv")
 
 def _normalize(name: str) -> str:
     name = os.path.splitext(name)[0].lower()
     return re.sub(r"[^a-z0-9]", "", name)
 
 def _parse_roles(role_str: str) -> List[str]:
-    role_map = {"public health": "Public_Health", "social work": "Social_Work",
-                "nurse": "Nurse", "pa": "PA", "pharmd": "PharmD",
-                "general": "General", "health administrator": "Health_Administrator",
-                "physical therapist": "Physical_Therapist"}
-    roles = []
-    for r in role_str.split(","):
-        r = r.strip().lower()
-        roles.append(role_map.get(r, r.title()))
-    return [r for r in roles if r]
+    return [r.strip() for r in role_str.split(",") if r.strip()]
 
 def _load_pdf_category_map() -> Dict[str, List[str]]:
     mapping: Dict[str, List[str]] = {}
-    if not os.path.exists(_PDF_CATEGORIES_CSV):
+    if not os.path.exists(_PDF_KNOWLEDGE_CSV):
         return mapping
-    with open(_PDF_CATEGORIES_CSV, "r", encoding="utf-8") as f:
-        reader = _csv.DictReader(f, delimiter="\t")
+    with open(_PDF_KNOWLEDGE_CSV, "r", encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
         for row in reader:
-            fname = row.get("parsed file", "").strip()
+            fname = row.get("Parsed File", "").strip()
             role_str = row.get("Role", "").strip()
             if fname and role_str:
                 mapping[_normalize(fname)] = _parse_roles(role_str)
@@ -437,7 +429,7 @@ def main():
     parser.add_argument("--question_json", default="src/rag/pdf_chunker/queries.json", help="Path to question.json.")
     parser.add_argument("--out_dir", default="./out", help="Output folder for CSV tables.")
     parser.add_argument("--k", type=int, default=3, help="Top-k retrieval (you want 3).")
-    parser.add_argument("--target_tokens", type=int, default=600, help="Target chunk size (approx tokens).")
+    parser.add_argument("--target_tokens", type=int, default=7000, help="Target chunk size (approx tokens).")
     parser.add_argument("--embed_model", default=DEFAULT_EMBED_MODEL, help="SentenceTransformer model.")
     args = parser.parse_args()
 

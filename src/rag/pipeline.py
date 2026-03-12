@@ -30,7 +30,7 @@ Custom directories:
         --web-json-dir  src/rag/web_extractor/outputs \\
         --pdf-txt-dir   src/rag/pdf_extractor/outputs \\
         --chunks-dir    ./out \\
-        --target-tokens 600
+        --target-tokens 7000
 """
 
 from __future__ import annotations
@@ -194,7 +194,7 @@ def main() -> None:
     parser.add_argument(
         "--target-tokens",
         type=int,
-        default=600,
+        default=7000,
         help="Target chunk size in tokens",
     )
 

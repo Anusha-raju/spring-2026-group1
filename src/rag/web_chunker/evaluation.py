@@ -7,9 +7,11 @@ sources feed into the same embedding retrieval pipeline.
 from __future__ import annotations
 
 import argparse
+import csv as _csv
 import glob
 import json
 import os
+import re
 import sys
 from typing import Any, Dict, List, Tuple
 
@@ -21,6 +23,40 @@ from nltk.tokenize import sent_tokenize
 from chunkers import chunk_sentence_pack
 from dataclass import Chunk
 from utils import estimate_tokens, normalize_text
+
+# ----------------------------
+# Web category lookup (from website_knowledge.csv)
+# ----------------------------
+
+_WEB_KNOWLEDGE_CSV = os.path.join(os.path.dirname(__file__), "..", "website_knowledge.csv")
+
+def _parse_web_roles(role_str: str) -> List[str]:
+    return [r.strip() for r in role_str.split(",") if r.strip()]
+
+def _load_web_category_map() -> Dict[str, List[str]]:
+    mapping: Dict[str, List[str]] = {}
+    if not os.path.exists(_WEB_KNOWLEDGE_CSV):
+        return mapping
+    with open(_WEB_KNOWLEDGE_CSV, "r", encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
+        for row in reader:
+            url = row.get("Web URL", "").strip()
+            role_str = row.get("Role", "").strip()
+            if url and role_str:
+                mapping[url] = _parse_web_roles(role_str)
+    return mapping
+
+_WEB_CATEGORY_MAP = _load_web_category_map()
+
+def _get_web_categories(url: str) -> List[str]:
+    if url in _WEB_CATEGORY_MAP:
+        return _WEB_CATEGORY_MAP[url]
+    # partial match on URL
+    for csv_url, cats in _WEB_CATEGORY_MAP.items():
+        if url and csv_url and (url in csv_url or csv_url in url):
+            return cats
+    return []
+
 
 OPIOID_TOPICS: Dict[str, List[str]] = {
     "overdose": [
@@ -128,7 +164,7 @@ def chunk_page(
             "source":     page.get("source", "website"),
             "url":        page.get("url", ""),
             "title":      page.get("title", ""),
-            "categories": page.get("categories", []),
+            "categories": _get_web_categories(page.get("url", "")),
             "text":       chunk.text,
             "token_count": estimate_tokens(chunk.text),
             "topics":     tags["topics"],
@@ -194,8 +230,8 @@ def main() -> None:
     parser.add_argument(
         "--target_tokens",
         type=int,
-        default=600,
-        help="Target chunk size in tokens (default: 600)",
+        default=7000,
+        help="Target chunk size in tokens (default: 7000)",
     )
     args = parser.parse_args()
 
