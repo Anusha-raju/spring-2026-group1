@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-K_VALUES = [1, 3, 5, 7, 10, 15]
+K_VALUES = [7]
 GROUND_TRUTH_PATH = os.path.join(SCRIPT_DIR, "ground_truth.json")
 
 # Output paths

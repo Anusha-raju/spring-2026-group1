@@ -18,42 +18,42 @@
     "relevant_keywords": ["buprenorphine", "partial agonist", "withdrawal", "office-based", "suboxone", "prescrib"],
     "min_keyword_matches": 2,
     "topic": "treatment",
-    "profession": "PA"
+    "profession": "Physician Assistant"
   },
   {
     "query": "What is methadone and when is it recommended for OUD treatment?",
     "relevant_keywords": ["methadone", "agonist", "daily dosing", "OTP", "opioid treatment program", "adherence"],
     "min_keyword_matches": 2,
     "topic": "treatment",
-    "profession": "PA"
+    "profession": "Physician Assistant"
   },
   {
     "query": "What is naltrexone and how does it work for opioid addiction?",
     "relevant_keywords": ["naltrexone", "antagonist", "blocking", "relapse", "abstinent", "vivitrol", "injectable"],
     "min_keyword_matches": 2,
     "topic": "naloxone",
-    "profession": "PA"
+    "profession": "Physician Assistant"
   },
   {
     "query": "How is the FQHC and CCBHC partnership structured for MOUD delivery?",
     "relevant_keywords": ["FQHC", "CCBHC", "Access", "Clark", "partnership", "MOUD", "behavioral health"],
     "min_keyword_matches": 2,
     "topic": "treatment",
-    "profession": "Public_Health"
+    "profession": "Public Health Professional"
   },
   {
     "query": "What training do staff receive for the MOUD program?",
     "relevant_keywords": ["training", "onboarding", "continuing education", "prescribing", "stigma", "bias"],
     "min_keyword_matches": 2,
     "topic": "treatment",
-    "profession": "Public_Health"
+    "profession": "Public Health Professional"
   },
   {
     "query": "How is medication-assisted treatment billed and financed?",
     "relevant_keywords": ["Medicaid", "billing", "insurance", "grant", "reimburse", "E&M", "code"],
     "min_keyword_matches": 2,
     "topic": "legal",
-    "profession": "Public_Health"
+    "profession": "Public Health Professional"
   },
   {
     "query": "What is opioid withdrawal and how should it be managed?",
@@ -67,28 +67,28 @@
     "relevant_keywords": ["psychosocial", "counseling", "treatment", "behavioral", "recovery", "support"],
     "min_keyword_matches": 2,
     "topic": "mental_health",
-    "profession": "Social_Work"
+    "profession": "Medical Social Worker"
   },
   {
     "query": "What is the role of drug testing in drug court programs?",
     "relevant_keywords": ["drug testing", "toxicology", "testing", "substance use", "sanctions", "self-report"],
     "min_keyword_matches": 2,
     "topic": "legal",
-    "profession": "Social_Work"
+    "profession": "Medical Social Worker"
   },
   {
     "query": "How are patients assessed and diagnosed for opioid use disorder?",
     "relevant_keywords": ["assessment", "diagnosis", "ASAM", "clinician", "multidimensional", "evaluation"],
     "min_keyword_matches": 2,
     "topic": "treatment",
-    "profession": "PA"
+    "profession": "Physician Assistant"
   },
   {
     "query": "What are the successes and challenges of the Access-Clark MOUD partnership?",
     "relevant_keywords": ["success", "challenge", "partnership", "Access", "Clark", "EHR", "psychiatry", "therapy"],
     "min_keyword_matches": 2,
     "topic": "treatment",
-    "profession": "Public_Health"
+    "profession": "Public Health Professional"
   },
   {
     "query": "What types of staff are involved in the MOUD care team?",
@@ -102,6 +102,6 @@
     "relevant_keywords": ["provider", "locator", "SAMHSA", "physician", "link", "refer", "office-based"],
     "min_keyword_matches": 2,
     "topic": "treatment",
-    "profession": "Social_Work"
+    "profession": "Medical Social Worker"
   }
 ]

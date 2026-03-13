@@ -56,10 +56,13 @@ class RetrievalEvaluator:
         ]
 
     def _get_profession_filtered_indices(self, profession: str) -> List[int]:
-        """Return indices of chunks whose categories include the given profession."""
+        """Return indices of chunks whose categories include the given profession or 'General'."""
         return [
             i for i, r in enumerate(self.chunk_records)
-            if isinstance(r, dict) and profession in r.get("categories", [])
+            if isinstance(r, dict) and (
+                profession in r.get("categories", [])
+                or "General" in r.get("categories", [])
+            )
         ]
 
     def evaluate_single_query(

@@ -94,6 +94,23 @@ class BGESmallEmbedding(SentenceTransformerEmbedding):
         super().__init__("BAAI/bge-small-en-v1.5", "BGE-small-en")
 
 
+class BGEM3Embedding(EmbeddingModel):
+    """BAAI/bge-m3 — 8192-token context window, forced to CPU to avoid MPS OOM."""
+
+    name = "BGE-M3"
+
+    def __init__(self):
+        from sentence_transformers import SentenceTransformer
+        self._model = SentenceTransformer("BAAI/bge-m3", device="cpu")
+        self._model.max_seq_length = 8192
+
+    def encode(self, texts: List[str]) -> np.ndarray:
+        return self._model.encode(texts, show_progress_bar=True, batch_size=4)
+
+    def encode_query(self, query: str) -> np.ndarray:
+        return self._model.encode([query], device="cpu")[0]
+
+
 # class InstructorXLEmbedding(EmbeddingModel):
 #     """
 #     HKUNLP Instructor-XL — instruction-tuned embedding model.
@@ -248,6 +265,7 @@ def get_all_models(include_openai: bool = True) -> List[EmbeddingModel]:
         MiniLMEmbedding(),
         MPNetEmbedding(),
         BGESmallEmbedding(),
+        # BGEM3Embedding(),
         TFIDFEmbedding(),
         BM25Retriever(),
     ]
