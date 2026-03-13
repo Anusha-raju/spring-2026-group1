@@ -25,7 +25,8 @@ from dataclass import Chunk
 from utils import estimate_tokens, normalize_text
 
 # ----------------------------
-# Web category lookup (from website_knowledge.csv)
+# Web knowledge lookup (from website_knowledge.csv)
+# Builds three maps keyed by: url, and normalized filename stem
 # ----------------------------
 
 _WEB_KNOWLEDGE_CSV = os.path.join(os.path.dirname(__file__), "..", "website_knowledge.csv")
@@ -33,25 +34,46 @@ _WEB_KNOWLEDGE_CSV = os.path.join(os.path.dirname(__file__), "..", "website_know
 def _parse_web_roles(role_str: str) -> List[str]:
     return [r.strip() for r in role_str.split(",") if r.strip()]
 
-def _load_web_category_map() -> Dict[str, List[str]]:
-    mapping: Dict[str, List[str]] = {}
+def _normalize_stem(fname: str) -> str:
+    """Normalize a filename (with or without .txt) to a lowercase lookup key."""
+    stem = os.path.splitext(fname)[0]
+    # treat both '/' and ':' as equivalent separators (macOS uses ':' for '/')
+    return stem.lower().replace("/", ":").replace("\\", ":")
+
+def _load_web_knowledge() -> Tuple[Dict[str, List[str]], Dict[str, str], Dict[str, List[str]]]:
+    """
+    Returns:
+        url_category_map  : url  → List[role]
+        file_url_map      : normalized stem → url
+        file_category_map : normalized stem → List[role]
+    """
+    url_cats: Dict[str, List[str]] = {}
+    file_url: Dict[str, str] = {}
+    file_cats: Dict[str, List[str]] = {}
     if not os.path.exists(_WEB_KNOWLEDGE_CSV):
-        return mapping
+        return url_cats, file_url, file_cats
     with open(_WEB_KNOWLEDGE_CSV, "r", encoding="utf-8") as f:
         reader = _csv.DictReader(f)
         for row in reader:
             url = row.get("Web URL", "").strip()
             role_str = row.get("Role", "").strip()
-            if url and role_str:
-                mapping[url] = _parse_web_roles(role_str)
-    return mapping
+            fname = row.get("Parsed File", "").strip()
+            if not role_str:
+                continue
+            roles = _parse_web_roles(role_str)
+            if url:
+                url_cats[url] = roles
+            if fname:
+                key = _normalize_stem(fname)
+                file_url[key] = url
+                file_cats[key] = roles
+    return url_cats, file_url, file_cats
 
-_WEB_CATEGORY_MAP = _load_web_category_map()
+_WEB_CATEGORY_MAP, _FILE_TO_URL, _FILE_CATEGORY_MAP = _load_web_knowledge()
 
 def _get_web_categories(url: str) -> List[str]:
     if url in _WEB_CATEGORY_MAP:
         return _WEB_CATEGORY_MAP[url]
-    # partial match on URL
     for csv_url, cats in _WEB_CATEGORY_MAP.items():
         if url and csv_url and (url in csv_url or csv_url in url):
             return cats
@@ -136,6 +158,42 @@ def load_web_pages(json_dir: str) -> List[Dict[str, Any]]:
 
     return pages
 
+
+def load_web_pages_txt(txt_dir: str) -> List[Dict[str, Any]]:
+    """
+    Load all ``*.txt`` files from *txt_dir* (produced by extract_to_txt.py).
+
+    Looks up URL and categories from the ``Parsed File`` column in
+    website_knowledge.csv via _FILE_TO_URL and _FILE_CATEGORY_MAP.
+
+    Returns:
+        List of page dicts with keys: url, title, categories, source, text, _filename.
+    """
+    paths = sorted(glob.glob(os.path.join(txt_dir, "*.txt")))
+    if not paths:
+        raise FileNotFoundError(f"No .txt files found in '{txt_dir}'")
+
+    pages: List[Dict[str, Any]] = []
+    for p in paths:
+        basename = os.path.basename(p)
+        key = _normalize_stem(basename)
+        url = _FILE_TO_URL.get(key, "")
+        categories = _FILE_CATEGORY_MAP.get(key, [])
+        stem = os.path.splitext(basename)[0]
+        title = stem.replace("-", " ").replace("_", " ")
+
+        text = open(p, "r", encoding="utf-8").read()
+        pages.append({
+            "_filename":  basename,
+            "url":        url,
+            "title":      title,
+            "categories": categories,
+            "source":     "website",
+            "text":       text,
+        })
+
+    return pages
+
 def chunk_page(
     page: Dict[str, Any],
     target_tokens: int,
@@ -164,7 +222,7 @@ def chunk_page(
             "source":     page.get("source", "website"),
             "url":        page.get("url", ""),
             "title":      page.get("title", ""),
-            "categories": _get_web_categories(page.get("url", "")),
+            "categories": page.get("categories") or _get_web_categories(page.get("url", "")),
             "text":       chunk.text,
             "token_count": estimate_tokens(chunk.text),
             "topics":     tags["topics"],
@@ -196,9 +254,13 @@ def save_chunks(
     )
 
 
-def run(json_dir: str, out_dir: str, target_tokens: int = 7000) -> None:
-    pages = load_web_pages(json_dir)
-    print(f"Loaded {len(pages)} web pages from '{json_dir}'")
+def run(json_dir: str, out_dir: str, target_tokens: int = 7000, txt_dir: str = None) -> None:
+    if txt_dir:
+        pages = load_web_pages_txt(txt_dir)
+        print(f"Loaded {len(pages)} web pages from '{txt_dir}' (txt mode)")
+    else:
+        pages = load_web_pages(json_dir)
+        print(f"Loaded {len(pages)} web pages from '{json_dir}'")
 
     total_chunks = 0
     for page in pages:
@@ -219,8 +281,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--json_dir",
-        default="src/rag/web_extractor/outputs",
+        default=None,
         help="Directory containing *.json files from web_processor.py",
+    )
+    parser.add_argument(
+        "--txt_dir",
+        default="src/rag/web_extractor/outputs_txt",
+        help="Directory containing *.txt files from extract_to_txt.py (preferred)",
     )
     parser.add_argument(
         "--out_dir",
@@ -241,9 +308,10 @@ def main() -> None:
         nltk.download("punkt")
 
     run(
-        json_dir=args.json_dir,
+        json_dir=args.json_dir or "src/rag/web_extractor/outputs",
         out_dir=args.out_dir,
         target_tokens=args.target_tokens,
+        txt_dir=args.txt_dir,
     )
 
 
