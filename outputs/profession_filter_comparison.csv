@@ -1,0 +1,8 @@
+model,k,mode,precision,recall,mrr,f1
+MiniLM-L6-v2,7,profession_filtered,0.5905,0.1027,0.78,0.1523
+MPNet-base-v2,7,profession_filtered,0.7048,0.1241,0.8222,0.1878
+BGE-small-en,7,profession_filtered,0.6476,0.11,0.8156,0.165
+TF-IDF,7,profession_filtered,0.7429,0.1311,0.8778,0.199
+BM25,7,profession_filtered,0.7048,0.1451,1.0,0.1988
+BGE-M3,7,profession_filtered,0.7524,0.1486,1.0,0.2057
+Instructor-XL,7,profession_filtered,0.581,0.0826,0.8056,0.1419

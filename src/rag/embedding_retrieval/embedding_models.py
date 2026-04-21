@@ -1,5 +1,3 @@
-"""Unified interface for multiple embedding techniques."""
-
 import os
 import logging
 from abc import ABC, abstractmethod
@@ -40,8 +38,31 @@ class EmbeddingModel(ABC):
         top_indices = np.argsort(scores)[::-1][:k]
         return [(int(idx), float(scores[idx])) for idx in top_indices]
 
+    def filtered_similarity_search(
+        self,
+        query: str,
+        corpus_embeddings: np.ndarray,
+        filtered_indices: List[int],
+        k: int,
+    ) -> List[Tuple[int, float]]:
+        """
+        Search only within filtered_indices (dense default).
+        Returns (global_index, score) pairs.
+        """
+        if not filtered_indices:
+            return []
+        k = min(k, len(filtered_indices))
+        arr = np.array(filtered_indices)
+        filtered_embs = corpus_embeddings[arr]
+        query_emb = self.encode_query(query)
+        query_norm = query_emb / (np.linalg.norm(query_emb) + 1e-10)
+        norms = filtered_embs / (np.linalg.norm(filtered_embs, axis=1, keepdims=True) + 1e-10)
+        scores = norms @ query_norm
+        top_local = np.argsort(scores)[::-1][:k]
+        return [(filtered_indices[int(i)], float(scores[i])) for i in top_local]
 
-# ── Dense: SentenceTransformer models ────────────────────────────────────────
+
+# Dense: SentenceTransformer models
 
 class SentenceTransformerEmbedding(EmbeddingModel):
     """Wrapper around any SentenceTransformer model."""
@@ -73,7 +94,48 @@ class BGESmallEmbedding(SentenceTransformerEmbedding):
         super().__init__("BAAI/bge-small-en-v1.5", "BGE-small-en")
 
 
-# ── Dense: OpenAI ────────────────────────────────────────────────────────────
+class BGEM3Embedding(EmbeddingModel):
+    """BAAI/bge-m3 — 8192-token context window, forced to CPU to avoid MPS OOM."""
+
+    name = "BGE-M3"
+
+    def __init__(self):
+        from sentence_transformers import SentenceTransformer
+        self._model = SentenceTransformer("BAAI/bge-m3", device="cpu")
+        self._model.max_seq_length = 8192
+
+    def encode(self, texts: List[str]) -> np.ndarray:
+        return self._model.encode(texts, show_progress_bar=True, batch_size=4)
+
+    def encode_query(self, query: str) -> np.ndarray:
+        return self._model.encode([query], device="cpu")[0]
+
+
+# class InstructorXLEmbedding(EmbeddingModel):
+#     """
+#     HKUNLP Instructor-XL — instruction-tuned embedding model.
+#     Uses task-specific instruction prefixes for corpus and query encoding.
+#     Forced to CPU to avoid MPS out-of-memory on Apple Silicon.
+#     """
+
+#     name = "Instructor-XL"
+
+#     CORPUS_INSTRUCTION = "Represent the medical document for retrieval:"
+#     QUERY_INSTRUCTION = "Represent the medical question for retrieving relevant documents:"
+
+#     def __init__(self):
+#         from InstructorEmbedding import INSTRUCTOR
+#         self._model = INSTRUCTOR("hkunlp/instructor-xl", device="cpu")
+
+#     def encode(self, texts: List[str]) -> np.ndarray:
+#         pairs = [[self.CORPUS_INSTRUCTION, t] for t in texts]
+#         return self._model.encode(pairs, batch_size=16, show_progress_bar=True)
+
+#     def encode_query(self, query: str) -> np.ndarray:
+#         return self._model.encode([[self.QUERY_INSTRUCTION, query]])[0]
+
+
+# Dense: OpenAI
 
 class OpenAIEmbedding(EmbeddingModel):
     """OpenAI text-embedding-3-small via the openai SDK."""
@@ -104,7 +166,7 @@ class OpenAIEmbedding(EmbeddingModel):
         return self._embed([query])[0]
 
 
-# ── Sparse: TF-IDF ──────────────────────────────────────────────────────────
+# Sparse: TF-IDF
 
 class TFIDFEmbedding(EmbeddingModel):
     """TF-IDF vectoriser with cosine similarity search."""
@@ -135,8 +197,21 @@ class TFIDFEmbedding(EmbeddingModel):
         top_indices = np.argsort(scores)[::-1][:k]
         return [(int(idx), float(scores[idx])) for idx in top_indices]
 
+    def filtered_similarity_search(
+        self, query: str, corpus_embeddings, filtered_indices: List[int], k: int
+    ) -> List[Tuple[int, float]]:
+        from sklearn.metrics.pairwise import cosine_similarity
+        if not filtered_indices:
+            return []
+        k = min(k, len(filtered_indices))
+        query_vec = self.encode_query(query)
+        filtered_embs = corpus_embeddings[filtered_indices]
+        scores = cosine_similarity(query_vec, filtered_embs).flatten()
+        top_local = np.argsort(scores)[::-1][:k]
+        return [(filtered_indices[int(i)], float(scores[i])) for i in top_local]
 
-# ── Sparse: BM25 ────────────────────────────────────────────────────────────
+
+# Sparse: BM25
 
 class BM25Retriever(EmbeddingModel):
     """BM25 ranking (no vector embeddings needed)."""
@@ -155,10 +230,10 @@ class BM25Retriever(EmbeddingModel):
         from rank_bm25 import BM25Okapi
         self._tokenized_corpus = [self._tokenize(t) for t in texts]
         self._bm25 = BM25Okapi(self._tokenized_corpus)
-        return np.array([])  # no embeddings needed
+        return np.array([])
 
     def encode_query(self, query: str) -> np.ndarray:
-        return np.array([])  # not used
+        return np.array([])
 
     def similarity_search(
         self, query: str, corpus_embeddings, k: int
@@ -170,8 +245,19 @@ class BM25Retriever(EmbeddingModel):
         top_indices = np.argsort(scores)[::-1][:k]
         return [(int(idx), float(scores[idx])) for idx in top_indices]
 
-
-# ── Factory ──────────────────────────────────────────────────────────────────
+    def filtered_similarity_search(
+        self, query: str, corpus_embeddings, filtered_indices: List[int], k: int
+    ) -> List[Tuple[int, float]]:
+        if self._bm25 is None:
+            raise RuntimeError("Must call encode() on corpus before searching")
+        if not filtered_indices:
+            return []
+        k = min(k, len(filtered_indices))
+        tokens = self._tokenize(query)
+        all_scores = self._bm25.get_scores(tokens)
+        pairs = [(idx, float(all_scores[idx])) for idx in filtered_indices]
+        pairs.sort(key=lambda x: x[1], reverse=True)
+        return pairs[:k]
 
 def get_all_models(include_openai: bool = True) -> List[EmbeddingModel]:
     """Instantiate all available embedding models."""
@@ -179,6 +265,7 @@ def get_all_models(include_openai: bool = True) -> List[EmbeddingModel]:
         MiniLMEmbedding(),
         MPNetEmbedding(),
         BGESmallEmbedding(),
+        # BGEM3Embedding(),
         TFIDFEmbedding(),
         BM25Retriever(),
     ]
@@ -187,4 +274,8 @@ def get_all_models(include_openai: bool = True) -> List[EmbeddingModel]:
             models.insert(3, OpenAIEmbedding())
         except (ValueError, ImportError) as e:
             logger.warning(f"Skipping OpenAI embeddings: {e}")
+    # try:
+    #     models.append(InstructorXLEmbedding())
+    # except (ImportError, Exception) as e:
+    #     logger.warning(f"Skipping Instructor-XL: {e}")
     return models
