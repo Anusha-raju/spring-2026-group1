@@ -1,0 +1,29 @@
+# PDF Extraction
+pypdf
+pdfplumber
+pdfminer.six
+PyMuPDF
+Pillow
+
+# Chunking
+nltk
+tiktoken
+
+# Embeddings & Retrieval
+sentence-transformers
+transformers
+torch
+faiss-cpu
+rank-bm25
+scikit-learn
+openai
+
+# Web Extraction
+trafilatura
+lxml
+requests
+
+# Data & Evaluation
+numpy
+pandas
+tabulate
