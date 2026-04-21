@@ -1,0 +1,16 @@
+model,k,query,precision,recall,mrr,f1
+MPNet-base-v2 (Pinecone),5,How should someone respond to an opioid overdose?,0.6,0.0265,1.0,0.0508
+MPNet-base-v2 (Pinecone),5,What are the signs and symptoms of opioid overdose?,0.0,0.0,0.0,0.0
+MPNet-base-v2 (Pinecone),5,What is buprenorphine and how is it used to treat opioid use disorder?,0.4,0.0185,1.0,0.0354
+MPNet-base-v2 (Pinecone),5,What is methadone and when is it recommended for OUD treatment?,0.4,0.0465,1.0,0.0833
+MPNet-base-v2 (Pinecone),5,What is naltrexone and how does it work for opioid addiction?,0.4,0.1053,1.0,0.1667
+MPNet-base-v2 (Pinecone),5,How is the FQHC and CCBHC partnership structured for MOUD delivery?,1.0,0.0562,1.0,0.1064
+MPNet-base-v2 (Pinecone),5,What training do staff receive for the MOUD program?,0.6,0.0508,1.0,0.0938
+MPNet-base-v2 (Pinecone),5,How is medication-assisted treatment billed and financed?,0.8,0.0667,1.0,0.1231
+MPNet-base-v2 (Pinecone),5,What is opioid withdrawal and how should it be managed?,0.4,0.037,1.0,0.0678
+MPNet-base-v2 (Pinecone),5,What psychosocial treatments are recommended alongside medication for OUD?,0.4,0.0072,1.0,0.0141
+MPNet-base-v2 (Pinecone),5,What is the role of drug testing in drug court programs?,0.2,0.0286,1.0,0.05
+MPNet-base-v2 (Pinecone),5,How are patients assessed and diagnosed for opioid use disorder?,0.2,0.0077,1.0,0.0148
+MPNet-base-v2 (Pinecone),5,What are the successes and challenges of the Access-Clark MOUD partnership?,1.0,0.0278,1.0,0.0541
+MPNet-base-v2 (Pinecone),5,What types of staff are involved in the MOUD care team?,0.2,0.0417,1.0,0.069
+MPNet-base-v2 (Pinecone),5,How can drug court participants be linked to medication-assisted treatment providers?,1.0,0.045,1.0,0.0862

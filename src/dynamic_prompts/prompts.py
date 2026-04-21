@@ -44,22 +44,3 @@ def generate_prompt_from_rag(question: str, role: str, top_k: int = TOP_K) -> st
 
     context = build_context(chunks)
     return generate_prompt(context=context, question=question, role=role)
-
-
-# def main() -> None:
-#     parser = argparse.ArgumentParser(description="Generate role-specific prompts from RAG context.")
-#     parser.add_argument("--question", required=True, help="The user question.")
-#     parser.add_argument("--role", required=True, help="The target role.")
-#     parser.add_argument("--top-k", type=int, default=TOP_K, help="Number of chunks to retrieve.")
-#     args = parser.parse_args()
-
-#     prompt = generate_prompt_from_rag(
-#         question=args.question,
-#         role=args.role,
-#         top_k=args.top_k,
-#     )
-#     print(prompt)
-
-
-# if __name__ == "__main__":
-#     main()
