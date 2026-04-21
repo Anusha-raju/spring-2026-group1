@@ -111,28 +111,101 @@ class BGEM3Embedding(EmbeddingModel):
         return self._model.encode([query], device="cpu")[0]
 
 
-# class InstructorXLEmbedding(EmbeddingModel):
-#     """
-#     HKUNLP Instructor-XL — instruction-tuned embedding model.
-#     Uses task-specific instruction prefixes for corpus and query encoding.
-#     Forced to CPU to avoid MPS out-of-memory on Apple Silicon.
-#     """
+class InstructorXLEmbedding(EmbeddingModel):
+    """
+    HKUNLP Instructor-XL — instruction-tuned embedding model.
+    Uses task-specific instruction prefixes for corpus and query encoding.
+    Forced to CPU to avoid MPS out-of-memory on Apple Silicon.
+    """
 
-#     name = "Instructor-XL"
+    name = "Instructor-XL"
 
-#     CORPUS_INSTRUCTION = "Represent the medical document for retrieval:"
-#     QUERY_INSTRUCTION = "Represent the medical question for retrieving relevant documents:"
+    CORPUS_INSTRUCTION = "Represent the medical document for retrieval:"
+    QUERY_INSTRUCTION = "Represent the medical question for retrieving relevant documents:"
 
-#     def __init__(self):
-#         from InstructorEmbedding import INSTRUCTOR
-#         self._model = INSTRUCTOR("hkunlp/instructor-xl", device="cpu")
+    def __init__(self):
+        from InstructorEmbedding import INSTRUCTOR
+        self._model = INSTRUCTOR("hkunlp/instructor-xl", device="cpu")
 
-#     def encode(self, texts: List[str]) -> np.ndarray:
-#         pairs = [[self.CORPUS_INSTRUCTION, t] for t in texts]
-#         return self._model.encode(pairs, batch_size=16, show_progress_bar=True)
+    def encode(self, texts: List[str]) -> np.ndarray:
+        pairs = [[self.CORPUS_INSTRUCTION, t] for t in texts]
+        return self._model.encode(pairs, batch_size=16, show_progress_bar=True)
 
-#     def encode_query(self, query: str) -> np.ndarray:
-#         return self._model.encode([[self.QUERY_INSTRUCTION, query]])[0]
+    def encode_query(self, query: str) -> np.ndarray:
+        return self._model.encode([[self.QUERY_INSTRUCTION, query]])[0]
+
+
+class OllamaEmbedding(EmbeddingModel):
+    """Ollama local embedding model (default: nomic-embed-text)."""
+
+    def __init__(self, model_name: str = "nomic-embed-text", base_url: str | None = None):
+        self._model_name = model_name
+        self._base_url = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
+        self.name = f"Ollama-{model_name}"
+        self._max_chars = int(os.getenv("OLLAMA_EMBED_MAX_CHARS", "12000"))
+
+    def _embed_one(self, text: str):
+        import requests
+
+        # Remove problematic null bytes and normalise whitespace.
+        clean = text.replace("\x00", " ").strip()
+        if not clean:
+            clean = " "
+
+        lengths = [
+            None,
+            self._max_chars,
+            max(8000, self._max_chars // 2),
+            4000,
+            2000,
+            1000,
+        ]
+        last_error = None
+        for max_len in lengths:
+            prompt = clean if max_len is None else clean[:max_len]
+            resp = requests.post(
+                f"{self._base_url}/api/embeddings",
+                json={"model": self._model_name, "prompt": prompt},
+                timeout=120,
+            )
+            if resp.status_code < 400:
+                return resp.json()["embedding"]
+            last_error = f"{resp.status_code} {resp.text[:200]}"
+
+        raise RuntimeError(
+            f"Ollama embedding failed after retries for model '{self._model_name}'. "
+            f"Last error: {last_error}"
+        )
+
+    def _embed_batch(self, texts: List[str]) -> np.ndarray:
+        import requests
+
+        # Prefer batch endpoint when available.
+        try:
+            resp = requests.post(
+                f"{self._base_url}/api/embed",
+                json={"model": self._model_name, "input": texts},
+                timeout=120,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            vectors = data.get("embeddings")
+            if vectors:
+                return np.asarray(vectors, dtype=np.float32)
+        except Exception:
+            pass
+
+        # Fallback to per-text endpoint for compatibility.
+        vectors = []
+        for text in texts:
+            vectors.append(self._embed_one(text))
+        return np.asarray(vectors, dtype=np.float32)
+
+    def encode(self, texts: List[str]) -> np.ndarray:
+        return self._embed_batch(texts)
+
+    def encode_query(self, query: str) -> np.ndarray:
+        return self._embed_batch([query])[0]
 
 
 # Dense: OpenAI
@@ -266,6 +339,7 @@ def get_all_models(include_openai: bool = True) -> List[EmbeddingModel]:
         MPNetEmbedding(),
         BGESmallEmbedding(),
         # BGEM3Embedding(),
+        # InstructorXLEmbedding(),
         TFIDFEmbedding(),
         BM25Retriever(),
     ]

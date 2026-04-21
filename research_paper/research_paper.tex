@@ -1,0 +1,696 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Neural Computing and Applications (Springer) LaTeX template
+%% Journal: Neural Computing and Applications
+%% Reference style: Numbered (sn-mathphys-num)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\documentclass[pdflatex,sn-mathphys-num]{sn-jnl}
+
+% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{amsthm}
+\usepackage{mathrsfs}
+\usepackage[title]{appendix}
+\usepackage{xcolor}
+\usepackage{textcomp}
+\usepackage{manyfoot}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{pdflscape}
+\usepackage[table]{xcolor}
+\usepackage{url}
+
+% ── Code listing style ────────────────────────────────────────────────────────
+\lstset{
+    basicstyle=\ttfamily\footnotesize,
+    backgroundcolor=\color{gray!8},
+    frame=single,
+    rulecolor=\color{gray!40},
+    breaklines=true,
+    breakatwhitespace=true,
+    numbers=none,
+    xleftmargin=4pt,
+    xrightmargin=4pt,
+    aboveskip=4pt,
+    belowskip=4pt,
+    columns=fullflexible,
+}
+
+\theoremstyle{thmstyleone}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+
+\theoremstyle{thmstyletwo}
+\newtheorem{example}{Example}
+\newtheorem{remark}{Remark}
+
+\theoremstyle{thmstylethree}
+\newtheorem{definition}{Definition}
+
+\raggedbottom
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+\title[BRIDGE: RAG Pipeline Design and Retrieval Evaluation] {BRIDGE: Bridging Roles and responsibilities through Interdisciplinary Dialogue and aGent Engagement --- A Multi-Agent Retrieval-Augmented System for Interprofessional Healthcare Education}
+
+%%=============================================================%%
+%% Author block --- anonymize for double-blind submission.
+%%=============================================================%%
+\author*[1]{\fnm{Anusha} \sur{Umashankar}}\email{anushau@gwu.edu}
+
+\author*[1]{\fnm{Hari Prasannaa} \sur{Thangavel Ravi}}\email{hariprasannaa.thangavelravi@gwu.edu}
+
+\author[2]{\fnm{Andrew} \sur{Wiss}}\email{awiss@gwu.edu}
+
+\author[3]{\fnm{Amir} \sur{Jafari}}\email{ajafari@gwu.edu}
+
+\affil*[1]{\orgdiv{Data Science Program}, \orgname{George Washington University},
+          \orgaddress{\city{Washington}, \state{DC}, \country{USA}}}
+          
+\affil[2]{\orgdiv{Milken Institute School of Public Health}, \orgname{George Washington University},
+          \orgaddress{\city{Washington}, \state{DC}, \country{USA}}}
+
+\affil[3]{\orgdiv{Data Science Program}, \orgname{George Washington University},
+          \orgaddress{\city{Washington}, \state{DC}, \country{USA}}}
+
+%%=============================================================%%
+\abstract{Interprofessional education (IPE) prepares healthcare students to collaborate across disciplines, but realistic team-based practice is difficult to scale. We present BRIDGE, a multi-agent conversational system that simulates six healthcare professionals --- a Nurse, Physician Assistant, Medical Social Worker, Physical Therapist, Public Health Professional, and Health Administrator --- each responding to the same clinical case from its own perspective. To reduce hallucination risk in a clinical teaching context, agent responses are grounded in a curated opioid-domain corpus through a Retrieval-Augmented Generation (RAG) layer. We report a systematic evaluation of the design choices that most affect retrieval quality: document chunking, embedding model selection, retrieval depth, and metadata-based pre-filtering. Five chunking strategies (fixed, fixed-with-overlap, recursive, sentence-pack, semantic) across four token targets (3000, 5000, 7000, 10000) and four retrieval depths ($k \in \{3,5,7,9\}$) are compared on a corpus of 116 chunks derived from 75 source documents. Seven embedding strategies are then benchmarked at the best-performing $k$, covering five dense neural models (MPNet-base-v2, BGE-small-en, MiniLM-L6-v2, Instructor-XL, BGE-M3) and two sparse lexical baselines (BM25, TF-IDF). We further examine two filtering modes --- topic-based and profession-based --- that mirror BRIDGE's per-agent architecture. Across chunking configurations, hit rates peaked at 0.933; recursive chunking at a 7000-token target with $k{=}7$ offered the best compromise between hit rate (0.867) and prompt cost. Among retrievers, BM25 and BGE-M3 both achieved MRR~$=~1.00$, with BGE-M3 giving the highest F1 (0.243). Topic filtering yielded negligible gains, while profession filtering --- which aligns with how students interact with BRIDGE --- substantially reduces each agent's search space. We discuss the trade-offs among these choices and outline limitations and next steps for clinical validation.}
+
+\keywords{retrieval-augmented generation, interprofessional education, embedding models, opioid use disorder, dense retrieval, BM25, multi-agent LLM, healthcare AI}
+
+\maketitle
+
+%%=============================================================%%
+\section{Introduction}\label{sec:intro}
+
+Healthcare outcomes depend on how well professionals from different disciplines communicate. Interprofessional education (IPE) is the pedagogical response to this reality: students from medicine, nursing, pharmacy, social work, and allied fields learn together to understand each other's scope and language before they practise together \cite{reeves2016ipe,who2010ipe}. The barrier, in most training programs, is not motivation but logistics. Coordinating schedules across schools, recruiting standardized patients, and running facilitated small-group sessions are expensive activities that schools can only afford sporadically.
+
+Large language models (LLMs) open a different path. A conversational agent can be available at any hour, can sustain long exchanges with a student, and can be shaped by a carefully written system prompt to emulate a specific professional voice. Recent work on multi-agent LLM systems demonstrates that several such agents, each with its own role and instructions, can be orchestrated to collaborate on a shared task \cite{park2023generative,wu2023autogen}. The pedagogical fit is suggestive: if six role-specific agents respond in parallel to the same clinical prompt, a student observes the same kind of multi-perspective reasoning that IPE is designed to teach.
+
+Two risks complicate that picture. First, clinical knowledge is not stable. Opioid prescribing regulations, dosing thresholds, and harm-reduction recommendations change on timescales much shorter than model training cycles. Second, LLMs are known to hallucinate specific facts with high confidence, and the failure mode is particularly dangerous when those facts concern medication, legal exposure, or emergency care \cite{ji2023survey,singhal2023medpalm}. An educational tool that confidently reports an incorrect naloxone dose is worse than no tool at all.
+
+Retrieval-Augmented Generation (RAG) is the standard mitigation: rather than rely on what a model memorized during training, the system retrieves evidence from a curated corpus at inference time and conditions the generated response on that evidence \cite{lewis2020rag,gao2023ragsurvey}. The quality of a RAG pipeline depends on several decisions that are often reported anecdotally --- how documents are chunked, which embedding model ranks passages, how many passages to retrieve, and whether metadata is used to narrow the search. For a domain as sensitive as clinical education, those decisions deserve explicit measurement.
+
+This paper contributes a RAG design and evaluation for BRIDGE, a multi-agent IPE system focused on opioid use disorder. Specifically, we (i) describe a per-agent retrieval architecture in which each profession queries its own curated slice of the corpus; (ii) benchmark five chunking strategies over four token budgets and four retrieval depths; (iii) compare seven retrievers, including dense neural encoders and sparse lexical baselines, on the opioid corpus; and (iv) evaluate two metadata-filtering schemes that reflect how BRIDGE structures its evidence base. The goal is not to invent a new retrieval algorithm but to report a reproducible comparison that practitioners building similar educational tools can use as a reference.
+
+The remainder of the paper is organized as follows. Section~\ref{sec:related} reviews related work on RAG, multi-agent LLMs, and computational support for IPE. Section~\ref{sec:bridge} describes the baseline BRIDGE system and its limitations. Section~\ref{sec:proposed} presents the proposed per-agent RAG architecture. Section~\ref{sec:methods} details the corpus, extraction pipeline, and experimental setup. Section~\ref{sec:results} reports results for chunking, embedding models, and metadata filtering. Section~\ref{sec:implementation} covers implementation details, including the referral mechanism and deployment. Section~\ref{sec:discussion} discusses findings and limitations, and Section~\ref{sec:conclusion} concludes.
+
+%%=============================================================%%
+\section{Related Work}\label{sec:related}
+
+\subsection{Retrieval-Augmented Generation}
+
+RAG was introduced to combine the parametric memory of a pre-trained language model with a non-parametric external store, allowing the model to cite current evidence rather than reproduce what it memorized during training \cite{lewis2020rag}. Izacard and Grave extended the idea with Fusion-in-Decoder, which encodes multiple retrieved passages independently before decoding \cite{izacard2021fid}. The survey by Gao et al. catalogues the maturation of the area into naive, advanced, and modular variants, with most recent research focused on improving retrieval precision, handling multi-hop queries, and reducing prompt-length overhead \cite{gao2023ragsurvey}.
+
+Chunking strategy receives less formal attention in the literature than it deserves. Practitioner-oriented work has converged on a small set of heuristics --- fixed-size windows, recursive character splitters, and embedding-based semantic splitting --- that are widely implemented in frameworks such as LangChain and LlamaIndex \cite{langchain2023,kamradt2023}. More recent academic work on late chunking and small-to-big retrieval demonstrates that the boundary between chunking and retrieval is itself a research object \cite{gunther2024late}. Our evaluation takes a pragmatic view: rather than propose a new chunker, we measure how five established strategies behave across a clinical corpus.
+
+\subsection{Embedding Models for Dense Retrieval}
+
+Dense retrievers rank passages using the cosine similarity of learned vector representations. Sentence-BERT \cite{reimers2019sbert} and MPNet \cite{song2020mpnet} established the practical viability of transformer-based sentence encoders. More recent models such as the BGE family \cite{xiao2023bge,chen2024bgem3} and E5 \cite{wang2022e5} have improved retrieval accuracy on general-domain benchmarks. Sparse lexical methods remain competitive. BM25 in particular continues to set a strong baseline on tasks where exact term overlap matters \cite{robertson2009bm25}, and recent studies caution against assuming dense retrievers dominate without case-specific evidence \cite{thakur2021beir}. Our comparison includes both families to avoid that assumption.
+
+\subsection{Multi-Agent LLM Systems}
+
+Orchestrating several LLM-backed agents to play distinct roles is an active research area. Generative agents were shown to produce plausible human-like behaviour in simulated social settings \cite{park2023generative}. Frameworks such as AutoGen \cite{wu2023autogen} and CAMEL \cite{li2023camel} formalize multi-agent conversation for programming and problem-solving tasks. The IPE context differs in an important way: the goal is not to reach consensus efficiently, but to surface role-specific reasoning so that a human student can compare perspectives. We therefore design BRIDGE to run agents in parallel rather than have them negotiate.
+
+\subsection{AI for Healthcare Education}
+
+LLMs fine-tuned or prompted for medical tasks --- MedPaLM \cite{singhal2023medpalm}, BioBERT \cite{lee2020biobert}, and others --- have demonstrated strong performance on medical question-answering benchmarks. Evidence from the education literature is thinner. Studies of virtual standardized patients date back to the pre-LLM era \cite{stevens2006virtual}, and recent work has begun to examine LLM-based tutors in specific clinical domains. To our knowledge, a per-agent, profession-partitioned RAG architecture for IPE has not been reported, and the trade-offs explored here have not been quantified on an opioid-education corpus.
+
+%%=============================================================%%
+\section{The BRIDGE System}\label{sec:bridge}
+
+BRIDGE is an AI-powered multi-agent platform for IPE in healthcare. It simulates collaborative clinical teamwork using six specialized agents that correspond to real professional roles: Nurse, Physician Assistant, Medical Social Worker, Physical Therapist, Public Health Professional, and Health Administrator. The agents respond in parallel to student questions about patient cases, with opioid overdose as the current primary scenario.
+
+\subsection{Architecture}
+
+The backend is a fully asynchronous FastAPI service integrated with OpenAI's GPT-4o-mini through the \texttt{AsyncOpenAI} client. The multi-agent orchestration layer, named \textit{Interprofessional AgentSystem}, dispatches all agents in parallel using Python's \texttt{asyncio.gather()} so that each professional perspective is produced without the latency of sequential calls. Each agent maintains its own conversation continuity through OpenAI's response-ID tracking. A shared conversation memory is stored in PostgreSQL; when its size exceeds 6{,}000 characters the memory is compressed asynchronously to contain context bloat and API cost.
+
+\subsection{Personalization}
+
+At registration, users complete a short professional intake form covering role, years of experience, academic background, and prior opioid-related clinical exposure. This profile is prepended to every agent's system prompt, so that responses are calibrated to the user's level rather than delivered at a fixed register.
+
+\subsection{Limitations of the Baseline}
+
+Although the baseline is functional, four limitations motivate the present work:
+
+\begin{enumerate}[leftmargin=2em]
+\item \textit{No external grounding.} Responses draw only on the parametric knowledge of GPT-4o-mini. Clinical guidelines and institution-specific protocols are not consulted at inference time, leaving the system exposed to hallucination and drift as guidelines evolve.
+\item \textit{Narrow case coverage.} A single scenario (Julia Baker, opioid overdose) limits generalization. Multi-morbidity cases and other specialties are not yet represented.
+\item \textit{Static prompts.} System prompts are hand-written and fixed. Nothing in the current pipeline adapts to user performance or conversation dynamics.
+\item \textit{No quantitative evaluation.} Response quality, clinical accuracy, and learning efficacy are not measured, which is a blocker for validating BRIDGE as an educational tool.
+\end{enumerate}
+
+The first limitation --- no external grounding --- is what the RAG component in this paper is designed to address.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.85\linewidth]{current_archi.png}
+    \caption{BRIDGE baseline system architecture. A student query is authenticated, enriched with the user profile, and dispatched to the selected agents in parallel. Each agent calls GPT-4o-mini using only parametric knowledge, and responses are logged to PostgreSQL.}
+    \label{fig:baseline}
+\end{figure}
+
+%%=============================================================%%
+\section{Proposed Approach}\label{sec:proposed}
+
+\subsection{Design Goals}
+
+The RAG layer is designed to meet three goals drawn directly from the baseline's limitations. Responses should be grounded in authoritative clinical sources (SAMHSA, CDC, FDA, NIDA) rather than model memory; the evidence base should be partitioned so that each agent retrieves from material relevant to its profession; and the corpus should be updatable without retraining, so that new guidelines can be absorbed quickly.
+
+\subsection{System Overview}
+
+BRIDGE is a full-stack web application on a cloud-based architecture (Table~\ref{tab:stack}). The React and TypeScript frontend provides a case-study interface where students compose a clinical scenario and select which agents should respond. A Python FastAPI backend orchestrates the LLM calls, manages conversation history, and supplies retrieved evidence chunks to each agent. Sessions and chat histories are persisted in PostgreSQL, hosted on AWS.
+
+\begin{table}[h]
+    \centering
+    \caption{BRIDGE Technology Stack}
+    \label{tab:stack}
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        \textbf{Layer} & \textbf{Technology} \\
+        \midrule
+        Frontend        & React, TypeScript, Tailwind CSS \\
+        Backend API     & FastAPI (Python) \\
+        Database        & PostgreSQL (Users, ChatSessions tables) \\
+        Authentication  & Supabase \\
+        Hosting         & AWS EC2 + API Gateway + S3 \\
+        LLM             & OpenAI \texttt{gpt-4o-mini} \\
+        \botrule
+    \end{tabular}
+\end{table}
+
+The contribution of this paper sits between prompt assembly and LLM invocation: retrieved evidence chunks are inserted into each agent's context immediately before the model is called.
+
+\subsection{Professional Agents}
+
+The six agents are not interchangeable copies of the same LLM. Each one receives a system prompt that fixes its professional identity, scope of practice, and communication style (Table~\ref{tab:agents}). When students read the six responses side-by-side, the differences in emphasis --- a nurse's airway-first framing, a social worker's focus on custody and continuity of care, a public-health response organized around population impact --- reproduce the multi-perspective reasoning that IPE seeks to teach.
+
+\begin{table}[h]
+    \centering
+    \caption{BRIDGE profession agents and clinical focus.}
+    \label{tab:agents}
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        \textbf{Agent} & \textbf{Clinical Focus} \\
+        \midrule
+        Nurse                      & Patient care, nursing observations \\
+        Physician Assistant        & Diagnostics, treatment planning \\
+        Medical Social Worker      & Social care, community resources \\
+        Physical Therapist         & Rehabilitation, recovery plans \\
+        Public Health Professional & Disease prevention, health education \\
+        Health Administrator       & Resource coordination, policy \\
+        \botrule
+    \end{tabular}
+\end{table}
+
+These six disciplines align with standard IPE frameworks \cite{reeves2016ipe} and span the continuum of care for opioid-related cases, from acute overdose management through social and legal support to prevention and financing.
+
+\subsection{Per-Agent RAG Architecture}
+
+Rather than one shared retriever serving all agents, the retrieval step is embedded in each agent's execution path. When a student submits a query, the backend dispatches it in parallel to every selected agent. Each agent then runs its own profession-filtered similarity search over chunks tagged with that profession's label.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.85\linewidth]{rag_flow.png}
+    \caption{Proposed RAG architecture. A student query is routed in parallel to the selected profession agents. Each agent filters the corpus to its profession and topic tags, performs dense similarity search, injects the top-$k$ passages into the prompt, and calls GPT-4o-mini.}
+    \label{fig:rag_arch}
+\end{figure}
+
+This design yields five to six evidence-grounded responses per student query, each drawn from a distinct professional slice of the evidence base. Corpus embeddings are pre-computed at startup and cached in memory, so the similarity search itself is sub-millisecond regardless of $k$. The one-time encoding cost (roughly three minutes for BGE-M3 on 116 chunks) is absorbed as a service-startup overhead.
+
+%%=============================================================%%
+\section{Methods}\label{sec:methods}
+
+This section describes the corpus, the extraction pipeline from heterogeneous source formats, the chunking and embedding choices that were evaluated, and the metrics used to compare them.
+
+\subsection{Corpus}
+
+The corpus targets the clinical scope of all six BRIDGE agents, with current emphasis on opioid use disorder (OUD). It contains 116 chunks derived from 75 source documents: 40 PDFs and 35 web pages. The PDF set includes federal clinical guidelines (SAMHSA, CDC, WHO, CMS), regional WHO operational guidance, state-level policy documents, peer-reviewed articles sourced from PMC and NIDA, CCBHC program reports, and interprofessional training materials. The web-sourced portion was drawn from CDC, NIDA, FDA, CHCS, NASHP, PMC, and the National Council for Mental Wellbeing.
+
+\subsubsection{Profession Categorization}
+
+Each source document is tagged with one or more BRIDGE profession labels. A URL appearing under multiple profession categories is fetched once and tagged with all applicable labels. Table~\ref{tab:chunks_by_profession} reports the approximate chunk distribution per profession. Public Health, Physician Assistant, and Nurse dominate because the opioid literature naturally emphasizes those roles; Physical Therapist and Health Administrator are deliberately smaller specializations that the expansion work in Section~\ref{sec:discussion} aims to broaden.
+
+\begin{table}[h]
+    \centering
+    \caption{Approximate chunk distribution by profession.}
+    \label{tab:chunks_by_profession}
+    \begin{tabular}{@{}lc@{}}
+        \toprule
+        \textbf{Profession} & \textbf{Approximate chunks} \\
+        \midrule
+        Public Health Professional & $\sim$48 \\
+        Physician Assistant     & $\sim$41 \\
+        Nurse                   & $\sim$38 \\
+        Medical Social Worker   & $\sim$21 \\
+        Physical Therapist      & $\sim$6 \\
+        Health Administrator    & $\sim$5 \\
+        General                 & $\sim$30 \\
+        \botrule
+    \end{tabular}
+\end{table}
+
+\subsubsection{Opioid Topic Taxonomy}
+
+After chunking, each chunk is automatically tagged with up to ten opioid-related topics using keyword matching (Table~\ref{tab:topics}). The taxonomy is intentionally coarse; a single chunk often carries several labels.
+
+\begin{table}[h]
+    \centering
+    \caption{Opioid topic taxonomy and representative keywords.}
+    \label{tab:topics}
+    \begin{tabular}{@{}ll@{}}
+        \toprule
+        \textbf{Topic} & \textbf{Representative keywords} \\
+        \midrule
+        \texttt{overdose}           & overdose, unresponsive, unconscious \\
+        \texttt{emergency}          & call 911, life-threatening, emergency \\
+        \texttt{naloxone}           & naloxone, narcan, intranasal \\
+        \texttt{withdrawal}         & withdrawal, detox, taper, physical depend. \\
+        \texttt{dosage}             & dosage, mg, milligram, titrate, twice daily \\
+        \texttt{treatment}          & buprenorphine, methadone, MOUD, OUD \\
+        \texttt{prevention}         & harm reduction, prevention, safe storage \\
+        \texttt{mental\_health}     & mental health, depression, PTSD \\
+        \texttt{legal}              & controlled substance, schedule, HIPAA \\
+        \texttt{patient\_education} & patient education, caregiver, warning signs \\
+        \botrule
+    \end{tabular}
+\end{table}
+
+\subsection{PDF Extraction}\label{sec:pdf_extraction}
+
+Most clinical guidelines circulate as PDF, a format optimized for visual rendering rather than structured data. Converting them into clean, machine-readable text was a non-trivial preprocessing step. Several extractors were compared. PyPDF is fast but loses structure on tables and multi-column layouts, producing disordered text in which the reading order is frequently wrong. pdfplumber improves table extraction when borders are explicit but is unreliable on borderless or visually implied tables. PyMuPDF delivers more consistent general-text extraction because it uses positional information to reconstruct reading order, which helps particularly in multi-column documents. An OCR preprocessing step with \texttt{ocrmypdf} was considered for scanned or hybrid PDFs.
+
+We adopted Docling as the final extractor. Docling's document-understanding pipeline preserves tables, layout, and reading order more reliably than the traditional tools we tested, at a non-trivial compute cost that is acceptable because extraction runs once per corpus build rather than per query. The cleaned text feeds the chunking and embedding pipeline described below.
+
+\subsection{Web Extraction}
+
+Each URL is fetched with retry, timeout, and validation checks, and the raw HTML is passed through Trafilatura to isolate the main readable content. The extracted material is parsed into headings, paragraphs, lists, and tables, then normalized to plain text. As with the PDFs, the result becomes the input to chunking and embedding.
+
+\subsection{Chunking Strategies}
+
+Five chunking methods were evaluated: \textit{fixed}, \textit{fixed with overlap}, \textit{recursive}, \textit{sentence-pack}, and \textit{semantic}. Each was run at four target chunk sizes --- 3000, 5000, 7000, and 10000 tokens --- and retrieved with four depths ($k \in \{3, 5, 7, 9\}$), yielding 80 configurations. Following common practice in the RAG literature \cite{langchain2023,kamradt2023,gunther2024late}, we measured Hit Rate (Recall@$k$), Average First Hit Rank, query latency, chunk-build time, index-build time, and total chunk count.
+
+\subsection{Embedding Models}
+
+Seven retrievers were benchmarked (Table~\ref{tab:models}), spanning dense neural encoders and sparse lexical baselines. All dense encoders are open-weight and were used without fine-tuning. Times in Table~\ref{tab:models} are one-time startup costs on the full 116-chunk corpus; per-query latency is sub-millisecond in all cases because embeddings are cached in memory.
+
+\begin{table}[h]
+    \centering
+    \caption{Embedding models: specifications and one-time encode time for the 116-chunk corpus.}
+    \label{tab:models}
+    \begin{tabular}{@{}llcc@{}}
+        \toprule
+        \textbf{Model} & \textbf{Dim.} & \textbf{Params.} & \textbf{Encode time} \\
+        \midrule
+        \texttt{all-mpnet-base-v2}    & 768   & 109M  & 29.6 s \\
+        \texttt{BAAI/bge-small-en}    & 384   & 33M   & 20.2 s \\
+        \texttt{all-MiniLM-L6-v2}     & 384   & 22M   & 4.2 s  \\
+        \texttt{hkunlp/instructor-xl} & 768   & 335M  & 120 s  \\
+        \texttt{BAAI/bge-m3}          & 1024  & 569M  & 150 s  \\
+        BM25                          & ---   & ---   & 0.3 s  \\
+        TF-IDF                        & vocab & ---   & 0.5 s  \\
+        \botrule
+    \end{tabular}
+\end{table}
+
+\subsection{Metadata Filtering}
+
+Two filtering schemes were evaluated. Topic filtering pre-filters candidate chunks to those whose opioid-topic tag matches the query's dominant topic. Profession filtering restricts each agent's search to chunks manually curated for its profession (the \texttt{categories} field). Profession tags are assigned at ingestion and, unlike the keyword-derived topic taxonomy, are not noisy.
+
+\subsection{Evaluation Metrics}
+
+For embedding comparison, we report Mean Reciprocal Rank (MRR), Precision@$k$, Recall@$k$, and F1@$k$ on a held-out evaluation set of representative student queries. MRR is treated as the primary metric because retrieved chunks are inserted directly into the agent's prompt; the quality of the top-ranked passage matters more than overall recall. For chunking comparison, Hit Rate and First Hit Rank are the primary measures.
+
+%%=============================================================%%
+\section{Experimental Results}\label{sec:results}
+
+\subsection{Chunking and Retrieval Depth}
+
+Across the 80 chunking configurations, the average hit rate was 0.758 and the maximum was 0.933. The first relevant chunk appeared on average within the top two results, suggesting that retrieval at moderate $k$ is generally strong in this corpus. Detailed per-configuration results are provided in Appendix~\ref{appendix:chunking}.
+
+Increasing $k$ from 3 to 7 produced consistent gains in hit rate. The step from $k=7$ to $k=9$ was small in most configurations, which is the familiar pattern of diminishing returns: most of the information the retriever can supply is already in the top five to seven passages, and beyond that, extra $k$ adds prompt overhead without improving coverage.
+
+Chunk size had a larger and more interesting effect. Larger chunks (7000 and 10000 tokens) tended to achieve higher hit rates than smaller chunks, but the effect interacted with the chunking method. Semantic splitting performed well at 10000 tokens (hit rate 0.933 at $k=5$) but produced a much larger chunk count (61 chunks) and far longer build times (60.7~s) than fixed or recursive methods. Fixed overlap and recursive chunking both reached hit rates of 0.933 at $k=9$ with 10000-token targets while keeping build time below 0.2~s.
+
+Table~\ref{tab:chunk_tradeoffs} summarizes the qualitative trade-off. The best compromise between retrieval quality and prompt cost observed in our runs was \textit{recursive chunking at a 7000-token target with $k=7$}, which reached hit rate 0.867 with only 35 chunks and 0.149~s build time. We adopt this configuration as the chunking baseline in the embedding comparison below. A larger corpus may shift the optimum; the values given here should be treated as specific to the current 75-document evidence base.
+
+\begin{table}[h]
+\caption{Qualitative chunk-size trade-offs.}
+\label{tab:chunk_tradeoffs}
+\centering
+\begin{tabular}{@{}p{4cm}p{4cm}@{}}
+\toprule
+\textbf{Smaller chunks} & \textbf{Larger chunks} \\
+\midrule
+More precise retrieval & Broader contextual coverage \\
+More chunks to index & Fewer chunks to index \\
+Higher indexing cost per corpus & Faster indexing \\
+Risk of context fragmentation & Better context retention \\
+\botrule
+\end{tabular}
+\end{table}
+
+\subsection{Embedding Model Comparison}
+
+All seven retrievers were evaluated at $k=7$ on the profession-unfiltered corpus (Table~\ref{tab:results_k7}).
+
+\begin{table}[h]
+  \centering
+  \caption{Retrieval metrics at $k=7$. Best value per column in bold.}
+  \label{tab:results_k7}
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    \textbf{Model} & \textbf{MRR} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
+    \midrule
+    MiniLM-L6-v2   & 0.8000          & 0.6381          & 0.0900          & 0.1550          \\
+    MPNet-base-v2  & 0.8000          & 0.6952          & 0.1220          & 0.1844          \\
+    BGE-small-en   & 0.9333          & 0.7143          & 0.1020          & 0.1750          \\
+    TF-IDF         & 0.9167          & 0.7619          & 0.1366          & 0.2076          \\
+    BM25           & \textbf{1.0000} & \textbf{0.8286} & \textbf{0.1721} & 0.2426          \\
+    BGE-M3         & \textbf{1.0000} & 0.8100          & 0.1630          & \textbf{0.2430} \\
+    Instructor-XL  & 0.9333          & 0.6571          & 0.1015          & 0.1723          \\
+    \botrule
+  \end{tabular}
+\end{table}
+
+Two results stand out. First, BM25 and BGE-M3 tied on MRR at 1.000, meaning every evaluation query had a relevant chunk at rank 1. Second, these two models also led on F1 (0.2426 and 0.2430, respectively), but the gap to the other retrievers was modest; TF-IDF reached F1~=~0.208 and is a credible lightweight choice.
+
+A more nuanced reading matters here. MRR of 1.000 is a ceiling effect on a 116-chunk corpus; the metric is sensitive but does not discriminate between the top retrievers. Precision@7 and Recall@7 are more informative: BM25 edges BGE-M3 on both (0.829 vs 0.810, 0.172 vs 0.163), but the difference is within a range that is unlikely to be practically meaningful on the current corpus. On a larger corpus --- which the BRIDGE roadmap anticipates --- dense retrievers typically scale better because they are less brittle to vocabulary mismatch \cite{thakur2021beir,chen2024bgem3}. We therefore recommend BGE-M3 as the default retriever when response quality is paramount, with BM25 as a lightweight fallback when startup time matters.
+
+Encoding cost is the practical counterweight. BGE-M3 encodes the 116-chunk corpus in 150~s, compared with 0.3~s for BM25. This is a one-time cost at service startup and does not affect query latency, but it matters for rapid iteration during development.
+
+\subsection{Metadata Filtering}
+
+\subsubsection{Topic Filtering}
+
+Topic-based pre-filtering produced essentially no benefit (Table~\ref{tab:topic_filter}). For BGE-M3, F1 at $k=7$ moved from 0.228 (unfiltered) to 0.231 (topic-filtered), a difference that is not practically meaningful. For BM25, TF-IDF, and Instructor-XL, topic filtering reduced F1 by between 0.004 and 0.008. Only MiniLM-L6-v2 and BGE-M3 showed small positive changes.
+
+\begin{table}[h]
+  \centering
+  \caption{Topic-filtered vs.\ baseline F1 at $k=7$.}
+  \label{tab:topic_filter}
+  \begin{tabular}{@{}lccc@{}}
+    \toprule
+    \textbf{Model} & \textbf{Baseline F1} & \textbf{Topic-filtered F1} & $\Delta$ \\
+    \midrule
+    MPNet-base-v2 & 0.1844 & 0.1844 & \phantom{$-$}0.0000 \\
+    BGE-small-en  & 0.1750 & 0.1742 & $-$0.0008 \\
+    BM25          & 0.2426 & 0.2385 & $-$0.0041 \\
+    MiniLM-L6-v2  & 0.1550 & 0.1590 & $+$0.0040 \\
+    TF-IDF        & 0.2076 & 0.1995 & $-$0.0081 \\
+    Instructor-XL & 0.1723 & 0.1682 & $-$0.0041 \\
+    BGE-M3        & 0.2281 & 0.2314 & $+$0.0033 \\
+    \botrule
+  \end{tabular}
+\end{table}
+
+The likely reason is that the opioid taxonomy is too coarse. Keyword-based tagging assigns many chunks to multiple topics, and queries sometimes map to a topic other than the one a reader would label. Single-topic pre-filtering therefore excludes legitimate matches. We do not recommend topic filtering in production.
+
+\subsubsection{Profession Filtering}
+
+Profession filtering is a structural rather than semantic restriction: each agent searches only the subset of chunks curated for its discipline. On a corpus of 116 chunks, each agent queries roughly 30--40 chunks rather than the full set. Because the filter aligns with how BRIDGE serves agents in parallel --- each agent speaks from its curated evidence base, not the union --- this filtering mode is the one deployed in production.
+
+We note one caveat. Our measured retrieval metrics above are computed without profession filtering, so they characterize the worst case. The anticipated effect of profession filtering is higher recall at a given $k$ for each agent (because the denominator is smaller), with MRR unchanged for the top retrievers that already sit at 1.00. A full per-agent evaluation with ground-truth relevance labels per profession is work we leave for future evaluation.
+
+%%=============================================================%%
+\section{System Implementation}\label{sec:implementation}
+
+This section covers three implementation components that are not strictly retrieval experiments but are necessary for BRIDGE to function as an educational tool: the retrieval-and-generation pipeline, the structured referral mechanism, and the deployment architecture.
+
+\subsection{Retrieval and Prompt Generation Pipeline}
+
+The production pipeline is single-stage. Given a query, the retriever selects relevant chunks using the query text, the agent's profession filter, and scenario metadata. The selected chunks are inserted into the agent's prompt alongside the user query, and GPT-4o-mini is called once to produce the final response. An earlier prototype used a two-stage design --- a prompt-synthesis call followed by a generation call --- but removing the synthesis step reduced latency and cost without measurable loss of response quality on internal tests.
+
+\subsection{Agent Referral}
+
+A professional who does not know the answer refers the patient to someone who does. Simulating that behaviour in the agents requires them to recognise when a question falls outside their scope. Early prototypes parsed free-text responses for referral cues such as "you should ask the pharmacist" and proved unreliable --- the smaller LLM sometimes omitted the cue entirely or phrased it in ways the parser missed. The current implementation uses OpenAI's structured-output feature with a JSON schema under \texttt{strict: true}:
+
+\begin{lstlisting}
+{ "response": "...", "refer_to": [...] }
+\end{lstlisting}
+
+The \texttt{refer\_to} field contains zero or more identifiers from a fixed enum: \texttt{nurse}, \texttt{physician}, \texttt{socialworker}, \texttt{therapist}, \texttt{publichealth}, \texttt{healthadmin}. Enforcing the schema at the API level guarantees that every response is machine-parseable regardless of model variance. An agent is instructed to trigger a referral only when another professional would give a meaningfully more relevant answer; the referral itself is a two-sentence acknowledgment plus a redirect to the appropriate colleague.
+
+When \texttt{refer\_to} is non-empty, the frontend renders labelled buttons below the response. Clicking a button resubmits the original query to the recommended agent. To prevent circular referrals, the UI maintains a session-level record of every agent that has already responded, and buttons pointing to agents in that set are suppressed so that each profession is consulted at most once per query.
+
+\subsection{Case Study Management}
+
+An administrator-controlled case management interface, accessible from the sidebar, allows instructors to add new patient scenarios through a form that collects a descriptive title, demographic fields, a condition summary, and a clinical narrative covering history of present illness, physical examination, laboratory results, and relevant background. Once submitted, a case appears in the case-selection dropdown for all users. Optional audio or video attachments --- recorded patient interviews, procedure demonstrations --- support richer, less text-bound scenarios.
+
+\subsection{Infrastructure and Deployment}
+
+The system runs on AWS. Backend services are hosted on Amazon EC2 and run the FastAPI orchestration layer. Processed document chunks and structured retrieval data are stored in Amazon RDS, while Supabase manages user data, authentication, sessions, and application-level metadata. Asynchronous execution is used throughout so that long-running multi-agent workflows do not block the user interface. The separation of user-facing and backend components supports scaling each tier independently as corpus size and user load grow.
+
+%%=============================================================%%
+\section{Discussion}\label{sec:discussion}
+
+\subsection{Interpretation of Results}
+
+Three findings are worth emphasizing. First, for a small curated corpus, the top retrievers saturate on MRR. Practitioners should not over-read MRR~=~1.000 as evidence that one retriever is categorically better than another; the ceiling is a property of the corpus size and evaluation set, not of the model. Precision, recall, and latency tell a more useful story.
+
+Second, classical sparse retrieval (BM25) remains competitive with state-of-the-art dense encoders on a clinical corpus of this size and vocabulary. Because clinical text is rich in exact terms --- drug names, dosages, ICD codes --- vocabulary overlap between query and passage is often strong, and that is BM25's natural regime. We therefore caution against assuming dense retrievers dominate by default in small, specialized corpora.
+
+Third, metadata filtering splits cleanly into two cases. Semantic filtering by topic tag, when tags are assigned by keyword matching, tends to exclude legitimate matches and should be avoided. Structural filtering by profession, when tags are curated manually, is safe because it reflects an editorial decision about what evidence each agent should have access to. The BRIDGE production system uses the latter and not the former.
+
+\subsection{Implications for Interprofessional Education}
+
+A common concern about using LLMs in medical education is hallucination under clinical pressure. RAG does not eliminate hallucination, but it reduces the surface area for it by constraining the model's input to verified evidence. The per-agent partitioning adds an editorial layer on top of that: a social worker agent does not see the same literature a physician assistant agent sees, which reinforces role-appropriate reasoning and makes disagreements between agents more pedagogically interesting rather than merely random. Whether this improves learning outcomes is an empirical question we cannot answer with retrieval metrics alone; it is a clinical-validation question that requires a user study.
+
+\subsection{Limitations}
+
+Several limitations should be acknowledged. \textit{Corpus size}: 116 chunks is small, and the metrics reported here may not transfer to a corpus an order of magnitude larger. \textit{Query set}: the evaluation set is constructed from representative student queries and is not large enough to support strong statistical claims. We did not run paired significance tests because the sample size would make such tests underpowered; a larger evaluation set is a priority for future work. \textit{Scope of validation}: we measured retrieval quality, not end-to-end response quality, pedagogical effectiveness, or clinical accuracy. \textit{Profession filter evaluation}: measured metrics are reported without profession filtering; per-agent relevance judgments are required to characterize the filter's effect rigorously. \textit{Single domain}: the corpus is limited to opioid use disorder; generalization to other clinical specialties has not been tested.
+
+\subsection{Threats to Validity}
+
+The evaluation queries were authored by the paper authors and review collaborators, which introduces an annotator-bias risk that is common in small-corpus RAG evaluations. The ground-truth relevance labels were produced alongside the corpus and could reflect the same editorial assumptions as the corpus itself. A blinded external evaluation would be valuable. GPT-4o-mini is used as the generator; results may not generalize to smaller open-weight models that might be preferable in cost-sensitive deployments.
+
+%%=============================================================%%
+\section{Conclusion and Future Work}\label{sec:conclusion}
+
+This paper presented BRIDGE, a multi-agent retrieval-augmented system for interprofessional healthcare education, and reported a systematic evaluation of the retrieval-layer design choices that most influence response quality. Five chunking strategies, four token budgets, four retrieval depths, seven retrievers, and two metadata-filtering schemes were compared on an opioid-education corpus. Recursive chunking at 7000 tokens with $k=7$ offered the best chunking compromise between hit rate and prompt cost. Among retrievers, BGE-M3 and BM25 both saturated MRR; BGE-M3 achieved the highest F1 and is our default choice for response quality, while BM25 remains a strong, lightweight fallback. Topic filtering was ineffective under the current coarse taxonomy; profession filtering is retained because it encodes a deliberate editorial partitioning that supports the multi-perspective design of IPE.
+
+Several directions follow. \textit{Corpus growth and continuous ingestion.} The evidence base is small by design; expanding it to cover further specialties and more scenarios, and automating the profession-tagging process, is the natural next step. \textit{Clinical validation study.} A user study with healthcare students is needed to test whether multi-agent RAG responses improve learning outcomes compared to either a single-agent baseline or traditional IPE formats. \textit{Cross-domain generalization.} We plan to extend the evaluation to diabetes management and pediatric emergency care to test how well the design choices transfer. \textit{Smaller open-weight generators.} Substituting GPT-4o-mini with open models would reduce cost and dependency on a single provider; quantifying the quality trade-off is a priority. \textit{Adaptive prompting.} Making agent prompts responsive to user performance, rather than static, could improve personalization beyond the current intake-form approach.
+
+BRIDGE is, ultimately, an educational tool, not a retrieval-systems contribution. The value of the evaluation reported here is that it documents the pragmatic decisions behind an IPE system and makes those decisions open to scrutiny and replication.
+
+%%=============================================================%%
+%% Backmatter
+%%=============================================================%%
+\backmatter
+
+\bmhead{Acknowledgements}
+The authors thank the BRIDGE capstone program at the George Washington University for supporting this work and the faculty reviewers who commented on an earlier draft.
+
+\section*{Declarations}
+
+\begin{itemize}
+\item \textbf{Funding:} No funding was received for conducting this study.
+\item \textbf{Conflict of interest:} The authors have no relevant financial or non-financial interests to disclose.
+\item \textbf{Ethics approval and consent to participate:} Not applicable.
+\item \textbf{Consent for publication:} Not applicable.
+\item \textbf{Data availability:} The opioid-education corpus and evaluation queries used in this study are available from the corresponding author upon reasonable request.
+\item \textbf{Materials availability:} Not applicable.
+\item \textbf{Code availability:} The BRIDGE source code and RAG evaluation scripts are available from the corresponding author upon reasonable request.
+\item \textbf{Author contribution:} Both authors contributed to the study conception and design. Corpus construction, extraction pipeline development, retrieval experiments, and statistical analysis were performed by Anusha Umashankar and Hari Prasannaa Thangavel Ravi. The first draft of the manuscript was written by the authors and all authors commented on previous versions of the manuscript. Both authors read and approved the final manuscript.
+\end{itemize}
+
+%%=============================================================%%
+%% Appendix
+%%=============================================================%%
+\begin{appendices}
+\section{Comprehensive Chunking Results}\label{appendix:chunking}
+
+Table~\ref{tab:comprehensive_summary} reports every chunking-method, token-target, and retrieval-depth combination evaluated in Section~\ref{sec:results}, for 80 configurations in total.
+
+\begin{landscape}
+\small
+\setlength{\LTleft}{0pt}
+\setlength{\LTright}{0pt}
+
+\begin{longtable}{@{}llrrrrrrrrr@{}}
+\caption{Comprehensive chunking and retrieval summary across methods, token targets, and $k$ values. Latency in ms, build and index times in s.}\label{tab:comprehensive_summary}\\
+\toprule
+Method & Tokens & $k$ & Hit Rate & First Hit Rank & Latency & Chunks & Build & Index & Avg Tok & p95 Tok \\
+\midrule
+\endfirsthead
+
+\toprule
+Method & Tokens & $k$ & Hit Rate & First Hit Rank & Latency & Chunks & Build & Index & Avg Tok & p95 Tok \\
+\midrule
+\endhead
+
+\midrule
+\multicolumn{11}{r}{Continued on next page} \\
+\midrule
+\endfoot
+
+\botrule
+\endlastfoot
+
+fixed & 3000 & 3 & 0.733 & 1.455 & 0.082 & 66 & 0.081 & 3.053 & 2684.0 & 3000.0 \\
+fixed & 3000 & 5 & 0.733 & 1.455 & 0.079 & 66 & 0.081 & 3.053 & 2684.0 & 3000.0 \\
+fixed & 3000 & 7 & 0.867 & 2.231 & 0.084 & 66 & 0.081 & 3.053 & 2684.0 & 3000.0 \\
+fixed & 3000 & 9 & 0.867 & 2.231 & 0.078 & 66 & 0.081 & 3.053 & 2684.0 & 3000.0 \\
+fixed\_overlap & 3000 & 3 & 0.533 & 1.625 & 0.092 & 76 & 0.144 & 3.991 & 2804.5 & 3000.0 \\
+fixed\_overlap & 3000 & 5 & 0.533 & 1.625 & 0.115 & 76 & 0.144 & 3.991 & 2804.5 & 3000.0 \\
+fixed\_overlap & 3000 & 7 & 0.533 & 1.625 & 0.110 & 76 & 0.144 & 3.991 & 2804.5 & 3000.0 \\
+fixed\_overlap & 3000 & 9 & 0.600 & 2.444 & 0.115 & 76 & 0.144 & 3.991 & 2804.5 & 3000.0 \\
+recursive & 3000 & 3 & 0.667 & 1.500 & 0.106 & 71 & 0.159 & 3.493 & 2495.3 & 2977.0 \\
+recursive & 3000 & 5 & 0.733 & 1.818 & 0.120 & 71 & 0.159 & 3.493 & 2495.3 & 2977.0 \\
+recursive & 3000 & 7 & 0.733 & 1.818 & 0.099 & 71 & 0.159 & 3.493 & 2495.3 & 2977.0 \\
+recursive & 3000 & 9 & 0.800 & 2.333 & 0.102 & 71 & 0.159 & 3.493 & 2495.3 & 2977.0 \\
+semantic & 3000 & 3 & 0.467 & 1.429 & 0.106 & 180 & 65.663 & 8.313 & 984.3 & 1127.7 \\
+semantic & 3000 & 5 & 0.467 & 1.429 & 0.096 & 180 & 65.663 & 8.313 & 984.3 & 1127.7 \\
+semantic & 3000 & 7 & 0.533 & 2.000 & 0.094 & 180 & 65.663 & 8.313 & 984.3 & 1127.7 \\
+semantic & 3000 & 9 & 0.533 & 2.000 & 0.082 & 180 & 65.663 & 8.313 & 984.3 & 1127.7 \\
+sentence\_pack & 3000 & 3 & 0.733 & 1.455 & 0.089 & 69 & 0.247 & 3.295 & 2567.6 & 2972.0 \\
+sentence\_pack & 3000 & 5 & 0.800 & 1.750 & 0.078 & 69 & 0.247 & 3.295 & 2567.6 & 2972.0 \\
+sentence\_pack & 3000 & 7 & 0.867 & 2.077 & 0.081 & 69 & 0.247 & 3.295 & 2567.6 & 2972.0 \\
+sentence\_pack & 3000 & 9 & 0.867 & 2.077 & 0.068 & 69 & 0.247 & 3.295 & 2567.6 & 2972.0 \\
+fixed & 5000 & 3 & 0.667 & 1.300 & 0.517 & 43 & 0.098 & 2.205 & 4119.6 & 5000.0 \\
+fixed & 5000 & 5 & 0.733 & 1.545 & 0.065 & 43 & 0.098 & 2.205 & 4119.6 & 5000.0 \\
+fixed & 5000 & 7 & 0.800 & 2.000 & 0.077 & 43 & 0.098 & 2.205 & 4119.6 & 5000.0 \\
+fixed & 5000 & 9 & 0.867 & 2.462 & 0.072 & 43 & 0.098 & 2.205 & 4119.6 & 5000.0 \\
+fixed\_overlap & 5000 & 3 & 0.800 & 1.500 & 0.090 & 49 & 0.143 & 2.480 & 4288.7 & 5000.0 \\
+fixed\_overlap & 5000 & 5 & 0.800 & 1.500 & 0.092 & 49 & 0.143 & 2.480 & 4288.7 & 5000.0 \\
+fixed\_overlap & 5000 & 7 & 0.800 & 1.500 & 0.098 & 49 & 0.143 & 2.480 & 4288.7 & 5000.0 \\
+fixed\_overlap & 5000 & 9 & 0.867 & 2.077 & 0.097 & 49 & 0.143 & 2.480 & 4288.7 & 5000.0 \\
+recursive & 5000 & 3 & 0.667 & 1.500 & 0.106 & 46 & 0.130 & 2.287 & 3851.1 & 4930.2 \\
+recursive & 5000 & 5 & 0.667 & 1.500 & 0.086 & 46 & 0.130 & 2.287 & 3851.1 & 4930.2 \\
+recursive & 5000 & 7 & 0.733 & 1.909 & 0.094 & 46 & 0.130 & 2.287 & 3851.1 & 4930.2 \\
+recursive & 5000 & 9 & 0.867 & 3.000 & 0.076 & 46 & 0.130 & 2.287 & 3851.1 & 4930.2 \\
+semantic & 5000 & 3 & 0.600 & 1.444 & 0.095 & 114 & 74.590 & 5.282 & 1554.3 & 1825.6 \\
+semantic & 5000 & 5 & 0.667 & 1.800 & 0.062 & 114 & 74.590 & 5.282 & 1554.3 & 1825.6 \\
+semantic & 5000 & 7 & 0.667 & 1.800 & 0.082 & 114 & 74.590 & 5.282 & 1554.3 & 1825.6 \\
+semantic & 5000 & 9 & 0.667 & 1.800 & 0.081 & 114 & 74.590 & 5.282 & 1554.3 & 1825.6 \\
+sentence\_pack & 5000 & 3 & 0.733 & 1.273 & 0.087 & 45 & 0.233 & 2.309 & 3936.8 & 4949.4 \\
+sentence\_pack & 5000 & 5 & 0.733 & 1.273 & 0.081 & 45 & 0.233 & 2.309 & 3936.8 & 4949.4 \\
+sentence\_pack & 5000 & 7 & 0.733 & 1.273 & 0.070 & 45 & 0.233 & 2.309 & 3936.8 & 4949.4 \\
+sentence\_pack & 5000 & 9 & 0.867 & 2.385 & 0.081 & 45 & 0.233 & 2.309 & 3936.8 & 4949.4 \\
+fixed & 7000 & 3 & 0.667 & 1.600 & 0.085 & 35 & 0.104 & 1.946 & 5061.3 & 7000.0 \\
+fixed & 7000 & 5 & 0.733 & 1.818 & 0.080 & 35 & 0.104 & 1.946 & 5061.3 & 7000.0 \\
+fixed & 7000 & 7 & 0.867 & 2.615 & 0.073 & 35 & 0.104 & 1.946 & 5061.3 & 7000.0 \\
+fixed & 7000 & 9 & 0.933 & 3.000 & 0.080 & 35 & 0.104 & 1.946 & 5061.3 & 7000.0 \\
+fixed\_overlap & 7000 & 3 & 0.733 & 1.455 & 0.096 & 38 & 0.134 & 2.117 & 5472.2 & 7000.0 \\
+fixed\_overlap & 7000 & 5 & 0.800 & 1.667 & 0.105 & 38 & 0.134 & 2.117 & 5472.2 & 7000.0 \\
+fixed\_overlap & 7000 & 7 & 0.867 & 2.000 & 0.101 & 38 & 0.134 & 2.117 & 5472.2 & 7000.0 \\
+fixed\_overlap & 7000 & 9 & 0.933 & 2.429 & 0.095 & 38 & 0.134 & 2.117 & 5472.2 & 7000.0 \\
+recursive & 7000 & 3 & 0.800 & 1.250 & 0.082 & 35 & 0.149 & 1.955 & 5061.4 & 6955.5 \\
+recursive & 7000 & 5 & 0.800 & 1.250 & 0.089 & 35 & 0.149 & 1.955 & 5061.4 & 6955.5 \\
+recursive & 7000 & 7 & 0.867 & 1.615 & 0.077 & 35 & 0.149 & 1.955 & 5061.4 & 6955.5 \\
+recursive & 7000 & 9 & 0.867 & 1.615 & 0.095 & 35 & 0.149 & 1.955 & 5061.4 & 6955.5 \\
+semantic & 7000 & 3 & 0.533 & 1.875 & 0.072 & 85 & 72.785 & 3.189 & 2084.4 & 2423.8 \\
+semantic & 7000 & 5 & 0.600 & 2.111 & 0.096 & 85 & 72.785 & 3.189 & 2084.4 & 2423.8 \\
+semantic & 7000 & 7 & 0.600 & 2.111 & 0.097 & 85 & 72.785 & 3.189 & 2084.4 & 2423.8 \\
+semantic & 7000 & 9 & 0.667 & 2.800 & 0.090 & 85 & 72.785 & 3.189 & 2084.4 & 2423.8 \\
+sentence\_pack & 7000 & 3 & 0.667 & 1.500 & 0.081 & 35 & 0.251 & 1.923 & 5061.6 & 6934.6 \\
+sentence\_pack & 7000 & 5 & 0.733 & 1.727 & 0.081 & 35 & 0.251 & 1.923 & 5061.6 & 6934.6 \\
+sentence\_pack & 7000 & 7 & 0.800 & 2.083 & 0.077 & 35 & 0.251 & 1.923 & 5061.6 & 6934.6 \\
+sentence\_pack & 7000 & 9 & 0.867 & 2.615 & 0.073 & 35 & 0.251 & 1.923 & 5061.6 & 6934.6 \\
+fixed & 10000 & 3 & 0.733 & 1.364 & 0.074 & 26 & 0.100 & 1.317 & 6813.2 & 10000.0 \\
+fixed & 10000 & 5 & 0.800 & 1.667 & 0.081 & 26 & 0.100 & 1.317 & 6813.2 & 10000.0 \\
+fixed & 10000 & 7 & 0.800 & 1.667 & 0.085 & 26 & 0.100 & 1.317 & 6813.2 & 10000.0 \\
+fixed & 10000 & 9 & 0.933 & 2.643 & 0.079 & 26 & 0.100 & 1.317 & 6813.2 & 10000.0 \\
+fixed\_overlap & 10000 & 3 & 0.733 & 1.273 & 0.085 & 28 & 0.179 & 1.562 & 7183.7 & 10000.0 \\
+fixed\_overlap & 10000 & 5 & 0.733 & 1.273 & 0.098 & 28 & 0.179 & 1.562 & 7183.7 & 10000.0 \\
+fixed\_overlap & 10000 & 7 & 0.867 & 2.077 & 0.097 & 28 & 0.179 & 1.562 & 7183.7 & 10000.0 \\
+fixed\_overlap & 10000 & 9 & 0.933 & 2.500 & 0.090 & 28 & 0.179 & 1.562 & 7183.7 & 10000.0 \\
+recursive & 10000 & 3 & 0.600 & 1.333 & 0.091 & 26 & 0.124 & 1.147 & 6813.4 & 9899.0 \\
+recursive & 10000 & 5 & 0.800 & 2.167 & 0.092 & 26 & 0.124 & 1.147 & 6813.4 & 9899.0 \\
+recursive & 10000 & 7 & 0.867 & 2.538 & 0.084 & 26 & 0.124 & 1.147 & 6813.4 & 9899.0 \\
+recursive & 10000 & 9 & 0.933 & 2.929 & 0.092 & 26 & 0.124 & 1.147 & 6813.4 & 9899.0 \\
+semantic & 10000 & 3 & 0.867 & 1.538 & 0.078 & 61 & 60.698 & 2.319 & 2904.3 & 3486.0 \\
+semantic & 10000 & 5 & 0.933 & 1.786 & 0.091 & 61 & 60.698 & 2.319 & 2904.3 & 3486.0 \\
+semantic & 10000 & 7 & 0.933 & 1.786 & 0.071 & 61 & 60.698 & 2.319 & 2904.3 & 3486.0 \\
+semantic & 10000 & 9 & 0.933 & 1.786 & 0.077 & 61 & 60.698 & 2.319 & 2904.3 & 3486.0 \\
+sentence\_pack & 10000 & 3 & 0.733 & 1.455 & 0.084 & 26 & 0.236 & 1.194 & 6813.6 & 9900.2 \\
+sentence\_pack & 10000 & 5 & 0.800 & 1.667 & 0.075 & 26 & 0.236 & 1.194 & 6813.6 & 9900.2 \\
+sentence\_pack & 10000 & 7 & 0.867 & 2.000 & 0.076 & 26 & 0.236 & 1.194 & 6813.6 & 9900.2 \\
+sentence\_pack & 10000 & 9 & 0.933 & 2.500 & 0.090 & 26 & 0.236 & 1.194 & 6813.6 & 9900.2 \\
+\end{longtable}
+\end{landscape}
+
+\end{appendices}
+
+%%===========================================================================================%%
+%% References
+%%===========================================================================================%%
+\begin{thebibliography}{99}
+
+\bibitem{reeves2016ipe}
+Reeves S, Palaganas J, Zierler B (2017) An updated synthesis of review evidence of interprofessional education. J Allied Health 46(1):56--61
+
+\bibitem{who2010ipe}
+World Health Organization (2010) Framework for Action on Interprofessional Education and Collaborative Practice. WHO Press, Geneva
+
+\bibitem{park2023generative}
+Park JS, O'Brien JC, Cai CJ, Morris MR, Liang P, Bernstein MS (2023) Generative agents: interactive simulacra of human behavior. In: Proc. 36th Annual ACM Symposium on User Interface Software and Technology (UIST '23). \url{https://doi.org/10.1145/3586183.3606763}
+
+\bibitem{wu2023autogen}
+Wu Q, Bansal G, Zhang J, Wu Y, Li B, Zhu E, Jiang L, Zhang X, Zhang S, Liu J, Awadallah AH, White RW, Burger D, Wang C (2023) AutoGen: enabling next-gen LLM applications via multi-agent conversation. arXiv preprint arXiv:2308.08155
+
+\bibitem{ji2023survey}
+Ji Z, Lee N, Frieske R, Yu T, Su D, Xu Y, Ishii E, Bang YJ, Madotto A, Fung P (2023) Survey of hallucination in natural language generation. ACM Comput Surv 55(12):1--38. \url{https://doi.org/10.1145/3571730}
+
+\bibitem{singhal2023medpalm}
+Singhal K, Azizi S, Tu T, Mahdavi SS, Wei J, Chung HW, Scales N, Tanwani A, Cole-Lewis H, Pfohl S, Payne P, Seneviratne M, Gamble P, Kelly C, Babiker A, Sch\"{a}rli N, Chowdhery A, Mansfield P, Demner-Fushman D, Ag\"{u}era y Arcas B, Webster D, Corrado GS, Matias Y, Chou K, Gottweis J, Tomasev N, Liu Y, Rajkomar A, Barral J, Semturs C, Karthikesalingam A, Natarajan V (2023) Large language models encode clinical knowledge. Nature 620:172--180. \url{https://doi.org/10.1038/s41586-023-06291-2}
+
+\bibitem{lewis2020rag}
+Lewis P, Perez E, Piktus A, Petroni F, Karpukhin V, Goyal N, K\"{u}ttler H, Lewis M, Yih W, Rockt\"{a}schel T, Riedel S, Kiela D (2020) Retrieval-augmented generation for knowledge-intensive NLP tasks. In: Advances in Neural Information Processing Systems 33 (NeurIPS 2020)
+
+\bibitem{gao2023ragsurvey}
+Gao Y, Xiong Y, Gao X, Jia K, Pan J, Bi Y, Dai Y, Sun J, Wang H (2023) Retrieval-augmented generation for large language models: a survey. arXiv preprint arXiv:2312.10997
+
+\bibitem{izacard2021fid}
+Izacard G, Grave E (2021) Leveraging passage retrieval with generative models for open domain question answering. In: Proc. 16th Conference of the European Chapter of the Association for Computational Linguistics (EACL)
+
+\bibitem{langchain2023}
+LangChain (2023) Text splitters documentation. \url{https://python.langchain.com/docs/modules/data_connection/document_transformers/}. Accessed 10 Feb 2026
+
+\bibitem{kamradt2023}
+Kamradt G (2023) Semantic chunking for retrieval-augmented generation. Technical report, Greg Kamradt AI Research
+
+\bibitem{gunther2024late}
+G\"{u}nther M, Milliken L, Geuter J, Mastrapas G, Wang B, Xiao H (2024) Late chunking: contextual chunk embeddings using long-context embedding models. arXiv preprint arXiv:2409.04701
+
+\bibitem{reimers2019sbert}
+Reimers N, Gurevych I (2019) Sentence-BERT: sentence embeddings using Siamese BERT-networks. In: Proc. 2019 Conference on Empirical Methods in Natural Language Processing (EMNLP)
+
+\bibitem{song2020mpnet}
+Song K, Tan X, Qin T, Lu J, Liu T-Y (2020) MPNet: masked and permuted pre-training for language understanding. In: Advances in Neural Information Processing Systems 33 (NeurIPS 2020)
+
+\bibitem{xiao2023bge}
+Xiao S, Liu Z, Zhang P, Muennighoff N (2023) C-pack: packaged resources to advance general Chinese embedding. arXiv preprint arXiv:2309.07597
+
+\bibitem{chen2024bgem3}
+Chen J, Xiao S, Zhang P, Luo K, Lian D, Liu Z (2024) BGE M3-embedding: multi-lingual, multi-functionality, multi-granularity text embeddings through self-knowledge distillation. arXiv preprint arXiv:2402.03216
+
+\bibitem{wang2022e5}
+Wang L, Yang N, Huang X, Jiao B, Yang L, Jiang D, Majumder R, Wei F (2022) Text embeddings by weakly-supervised contrastive pre-training. arXiv preprint arXiv:2212.03533
+
+\bibitem{robertson2009bm25}
+Robertson S, Zaragoza H (2009) The probabilistic relevance framework: BM25 and beyond. Found Trends Inf Retr 3(4):333--389. \url{https://doi.org/10.1561/1500000019}
+
+\bibitem{thakur2021beir}
+Thakur N, Reimers N, R\"{u}ckl\'{e} A, Srivastava A, Gurevych I (2021) BEIR: a heterogeneous benchmark for zero-shot evaluation of information retrieval models. In: Proc. NeurIPS 2021 Track on Datasets and Benchmarks
+
+\bibitem{li2023camel}
+Li G, Hammoud H, Itani H, Khizbullin D, Ghanem B (2023) CAMEL: communicative agents for "mind" exploration of large language model society. In: Advances in Neural Information Processing Systems 36 (NeurIPS 2023)
+
+\bibitem{lee2020biobert}
+Lee J, Yoon W, Kim S, Kim D, Kim S, So CH, Kang J (2020) BioBERT: a pre-trained biomedical language representation model for biomedical text mining. Bioinformatics 36(4):1234--1240. \url{https://doi.org/10.1093/bioinformatics/btz682}
+
+\bibitem{stevens2006virtual}
+Stevens A, Hernandez J, Johnsen K, Dickerson R, Raij A, Harrison C, DiPietro M, Allen B, Ferdig R, Foti S, Jackson J, Shin M, Cendan J, Watson R, Duerson M, Lok B, Cohen M, Wagner P, Lind DS (2006) The use of virtual patients to teach medical students history taking and communication skills. Am J Surg 191(6):806--811
+
+\end{thebibliography}
+
+\end{document}
