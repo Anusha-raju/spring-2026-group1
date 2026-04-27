@@ -29,7 +29,7 @@ The current version introduces a sophisticated **Retrieve-Then-Generate** archit
 - **Profession-Filtered Retrieval**: Unlike global search, each agent queries a partitioned index filtered by its professional category. This ensures a Nurse retrieves nursing-specific evidence while a Social Worker retrieves community resources.
 - **Core Technology Stack**:
     - **LLM**: OpenAI `gpt-5.2` (Reasoning & Synthesis).
-    - **Embedding Model**: `nomic-embed-text`
+    - **Embedding Model**: `BGE-M3`
     - **Vector Store**: 
         - For testing: [Pinecone](https://www.pinecone.io/)         
         - For production: Amazon RDS with pgvector extension (Metadata-filtered production storage).

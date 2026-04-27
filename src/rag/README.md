@@ -8,7 +8,7 @@ The system is designed as a unified 4-stage pipeline, orchestrated by `pipeline.
 
 1.  **Extraction**: Ingests document data from local PDFs (`pdf_extractor`) and remote URLs (`web_extractor`).
 2.  **Web Chunking**: Segments web-scraped content into normalized JSONL records (`web_chunker`).
-3.  **PDF Chunking**: Applies multiple segmentation strategies (Fixed, Recursive, Semantic) to extracted PDF text (`pdf_chunker`).
+3.  **PDF Chunking**: Applies multiple segmentation strategies (Fixed, Fixed-with-Overlap, Recursive, Sentence-Pack, Semantic) to extracted PDF text (`pdf_chunker`).
 4.  **Evaluation**: Benchmarks retrieval accuracy (Hit@K, Precision, Recall, MRR) across different embedding models and search depths (`embedding_retrieval`).
 
 ## Knowledge Management
@@ -21,7 +21,7 @@ The pipeline is driven by centralized knowledge maps that associate source docum
 ## Core Modules
 
 - **`pdf_extractor` / `web_extractor`**: Multi-engine extractors supporting Docling, PDFPlumber, and Trafilatura.
-- **`pdf_chunker` / `web_chunker`**: Experimental frameworks for testing semantic vs. structural segmentation.
+- **`pdf_chunker` / `web_chunker`**: Experimental frameworks for testing five segmentation strategies: fixed, fixed-with-overlap, recursive, sentence-pack, and semantic.
 - **`embedding_retrieval`**: Integration with Pinecone for production retrieval and Numpy-based benchmarking for offline model comparison.
 
 ## Usage
