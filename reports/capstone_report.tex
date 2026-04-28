@@ -141,7 +141,7 @@ Each selected agent processes the same query independently, allowing simultaneou
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.72\textwidth]{figs/current_architecture.png}
+\includegraphics[width=0.72\textwidth]{figs/current_architecture.pdf}
 \caption{Baseline BRIDGE system architecture. The figure illustrates how an authenticated student query is passed through the backend and dispatched to selected role-specific agents in parallel.}
 \label{fig:baseline_architecture}
 \end{figure}
@@ -237,7 +237,7 @@ This architecture supports role-aware, evidence-grounded, and context-sensitive 
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.62\textwidth]{figs/rag_flow.png}
+\includegraphics[width=0.62\textwidth]{figs/ragflow.pdf}
 \caption{Proposed per-agent RAG workflow. The query is routed to selected agents, filtered by metadata, matched against the evidence corpus, and used to construct evidence-grounded responses.}
 \label{fig:rag_flow}
 \end{figure}
@@ -648,27 +648,9 @@ Profession filtering should be used in BRIDGE because it supports the core purpo
 
 \section{Retrieval and Prompt Generation Pipeline}
 
-BRIDGE uses a two-stage generation design:
+The pipeline operates in a one-shot manner. For each input query, the retriever gathers relevant chunks using the query text, the agent’s professional profile, and other scenario-specific context. These retrieved chunks are then combined with the original query and passed into the agent’s prompt.
 
-\textbf{Stage 1: Dynamic Prompt Generation}
-
-The retrieved chunks are first passed to an LLM, which synthesizes them into a dynamic prompt. This step transforms raw retrieved evidence into a more organized and focused prompt for the target agent.
-
-\textbf{Stage 2: Final Response Generation}
-
-The generated dynamic prompt is then combined with the user's original content and sent again to the LLM to produce the final response.
-
-\textbf{Benefits of This Two-Stage Design}
-
-\begin{itemize}[leftmargin=1.5em]
-    \item Avoids over-reliance on static prompt templates
-    \item Allows evidence-aware prompt construction
-    \item Reduces redundancy
-    \item Improves flexibility across different scenarios
-    \item Supports more coherent final responses
-\end{itemize}
-
-This feature is especially useful when retrieved chunks are long or varied, because the intermediate prompt generation step helps structure the evidence before the final answering.
+Once the prompt is prepared, GPT-5.2 is invoked a single time to generate the final output. An earlier version of the system used a two-step process, where prompt synthesis and response generation were handled by separate API calls. However, this additional complexity was later removed after being found unnecessary.
 
 \section{Agent Referral System}
 
